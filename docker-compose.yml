@@ -11,6 +11,11 @@ services:
       - db_data:/var/lib/postgresql/data
     ports:
       - "5433:5432"
+    healthcheck:  # Add health check
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   pgadmin:
     image: dpage/pgadmin4
@@ -20,13 +25,14 @@ services:
     ports:
       - "5050:80"
     depends_on:
-      - db
+      db:
+        condition: service_healthy  # Wait for db health check
 
   web:
     build:
       context: ./backend
       dockerfile: Dockerfile
-    command: bash -c "sleep 10 && python manage.py migrate && python manage.py runserver 0.0.0.0:8000"
+    command: bash -c "python manage.py migrate && python manage.py runserver 0.0.0.0:8000"  # Remove sleep
     volumes:
       - ./backend:/code
     ports:
@@ -34,7 +40,8 @@ services:
     env_file:
       - ./backend/.env
     depends_on:
-      - db
+      db:
+        condition: service_healthy  # Wait for db health check
 
 volumes:
   db_data:

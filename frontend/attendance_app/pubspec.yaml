@@ -33,10 +33,14 @@ dependencies:
   dio: ^5.0.0
   flutter_secure_storage: ^8.0.0
   flutter_riverpod: ^2.0.0
+  http: ^1.1.0
+  shared_preferences: ^2.2.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.8
+
+  provider: ^6.1.1  # For state management
 
 dev_dependencies:
   flutter_test:
