@@ -316,6 +316,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     setState(() => _isLoading = true);
 
     try {
+      // Call Authservice
       final result = await _authService.login(
         _usernameController.text.trim(),
         _passwordController.text.trim(),
@@ -324,20 +325,21 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       if (!mounted) return;
 
       if (result == true) {
+        // Get user role from stored data
         final role = await _authService.getUserRole();
 
         if (!mounted) return;
-
+        // ROute based on role
         switch (role.toLowerCase()) {
           case 'teacher':
             Navigator.pushReplacementNamed(context, '/teacher');
             _showSuccessSnackBar(
-                'Welcome back, ${_usernameController.text}! 👋');
+                'Welcome back, ${_usernameController.text}!');
             break;
           case 'student':
             Navigator.pushReplacementNamed(context, '/student');
             _showSuccessSnackBar(
-                'Welcome back, ${_usernameController.text}! 👋');
+                'Welcome back, ${_usernameController.text}! ');
             break;
           case 'admin':
             Navigator.pushReplacementNamed(context, '/admin');

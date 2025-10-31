@@ -16,7 +16,23 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
-from attendance.views import RegisterView, MeView, MyTokenObtainPairView, ping
+from attendance.views import (
+    RegisterView, 
+    MeView, 
+    MyTokenObtainPairView, 
+    ping,
+    class_list_create,
+    class_detail,
+    get_class_students,
+    add_student_to_class,
+    remove_student_from_class,
+    # Session views
+    create_session,
+    get_active_sessions,
+    get_session_details,
+    mark_attendance,
+    end_session,
+)
 from rest_framework_simplejwt.views import TokenRefreshView
 
 urlpatterns = [
@@ -29,6 +45,20 @@ urlpatterns = [
     # User management
     path('api/v1/auth/register/', RegisterView.as_view(), name='register'),
     path('api/v1/auth/me/', MeView.as_view(), name='me'),
+    
+    # Class management
+    path('api/v1/classes/', class_list_create, name='class_list_create'),
+    path('api/v1/classes/<int:class_id>/', class_detail, name='class_detail'),
+    path('api/v1/classes/<int:class_id>/students/', get_class_students, name='class_students'),
+    path('api/v1/classes/<int:class_id>/add-student/', add_student_to_class, name='add_student'),
+    path('api/v1/classes/<int:class_id>/remove-student/<int:student_id>/', remove_student_from_class, name='remove_student'),
+    
+    # Session management
+    path('api/v1/sessions/create/', create_session, name='create_session'),
+    path('api/v1/sessions/active/', get_active_sessions, name='active_sessions'),
+    path('api/v1/sessions/<uuid:session_id>/', get_session_details, name='session_details'),
+    path('api/v1/sessions/<uuid:session_id>/mark/', mark_attendance, name='mark_attendance'),
+    path('api/v1/sessions/<uuid:session_id>/end/', end_session, name='end_session'),
     
     # Utility
     path('api/v1/ping/', ping, name='ping'),

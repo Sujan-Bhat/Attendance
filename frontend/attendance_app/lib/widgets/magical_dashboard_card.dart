@@ -5,6 +5,7 @@ class MagicalDashboardCard extends StatefulWidget {
   final String subtitle;
   final IconData icon;
   final Color color;
+  final VoidCallback? onTap;
 
   const MagicalDashboardCard({
     super.key,
@@ -12,6 +13,7 @@ class MagicalDashboardCard extends StatefulWidget {
     required this.subtitle,
     required this.icon,
     required this.color,
+    this.onTap,
   });
 
   @override
@@ -93,6 +95,7 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
         _stopShimmer();
       },
       child: GestureDetector(
+        onTap: widget.onTap,
         behavior: HitTestBehavior.translucent,
         onTapDown: (_) {
           setState(() => _pressed = true);

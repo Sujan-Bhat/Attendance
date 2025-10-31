@@ -408,11 +408,12 @@ class _SignUpPageState extends State<SignUpPage>
   }
 
   Future<void> _handleSignUp() async {
+    //1. Validate form
     if (!_isFormValid) {
       _showErrorSnackBar('Please fill all fields correctly');
       return;
     }
-
+    // 2. Check if passwords match
     if (_passwordController.text != _confirmPasswordController.text) {
       _showErrorSnackBar('Passwords do not match');
       return;
@@ -420,6 +421,7 @@ class _SignUpPageState extends State<SignUpPage>
 
     setState(() => _isLoading = true);
 
+    // 3. Call AuthService.signUp()
     try {
       final success = await AuthService().signUp(
         username: _usernameController.text.trim(),
@@ -432,7 +434,7 @@ class _SignUpPageState extends State<SignUpPage>
       if (!mounted) return;
 
       if (success) {
-        _showSuccessSnackBar('Account created successfully! 🎉');
+        _showSuccessSnackBar('Account created successfully!');
         await Future.delayed(const Duration(seconds: 1));
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/login');

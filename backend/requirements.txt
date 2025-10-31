@@ -9,3 +9,5 @@ PyJWT==2.10.1
 python-dotenv==1.1.1
 sqlparse==0.5.3
 djangorestframework-simplejwt
+qrcode==7.4.2
+Pillow==10.4.0

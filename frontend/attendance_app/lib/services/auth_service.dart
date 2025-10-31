@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
 class AuthService {
+  // make POST request to /auth/token/ to get JWT tokens
   final String baseUrl = 'http://localhost:8000/api/v1'; 
   final Dio _dio = Dio();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
@@ -28,15 +29,18 @@ class AuthService {
 
   Future<bool> login(String username, String password) async {
     try {
+      // Step 1: Make POST request to /auth/token/ endpoint(Django backend)
       final response = await _dio.post('/auth/token/', data: {
         'username': username,
         'password': password,
       });
 
       if (response.statusCode == 200) {
+        // Step 2: Store tokens securely
         await _storage.write(key: 'access_token', value: response.data['access']);
         await _storage.write(key: 'refresh_token', value: response.data['refresh']);
 
+        // Step 3: Fetch and store user profile data
         try {
           final me = await _dio.get('/auth/me/');
           await _storage.write(key: 'user', value: json.encode(me.data));
@@ -47,11 +51,11 @@ class AuthService {
       }
       return false;
     } on DioException catch (e) {
-      print('❌ Login error [${e.response?.statusCode}]: ${e.response?.data ?? e.message}');
+      print('Login error [${e.response?.statusCode}]: ${e.response?.data ?? e.message}');
       // Let the UI handle the DioException
       rethrow;
     } catch (e) {
-      print('❌ Unexpected login error: $e');
+      print('Unexpected login error: $e');
       rethrow;
     }
   }
@@ -64,6 +68,7 @@ class AuthService {
     required String role,
   }) async {
     try {
+      // Make POST request to /auth/register/ endpoint(Django backend)
       final response = await _dio.post('/auth/register/', data: {
         'username': username,
         'email': email,
@@ -71,6 +76,7 @@ class AuthService {
         'password2': password2,
         'role': role.toLowerCase(),
       });
+      // Success if status code is 201 Created
       return response.statusCode == 201;
     } on DioException catch (e) {
       print('Signup error: ${e.response?.data ?? e.message}');
