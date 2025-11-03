@@ -624,31 +624,7 @@ curl -X GET http://localhost:8000/api/v1/auth/me/ \
 
 ---
 
-## 🎯 Roadmap
 
-- [ ] Email notifications for attendance
-- [ ] Geolocation verification
-- [ ] Face recognition (optional)
-- [ ] Attendance analytics dashboard
-- [ ] Export reports (PDF/Excel)
-- [ ] Push notifications
-- [ ] Multiple language support
-- [ ] Dark mode
-- [ ] Offline mode support
-
----
-
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
-
----
-
-## 👥 Authors
-
-- **Your Name** - *Initial work* - [YourGitHub](https://github.com/YOUR_USERNAME)
-
----
 
 ## 🙏 Acknowledgments
 
