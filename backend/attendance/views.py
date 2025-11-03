@@ -494,21 +494,28 @@ def mark_attendance(request, session_id):
         session = AttendanceSession.objects.get(session_id=session_id)
     except AttendanceSession.DoesNotExist:
         return Response(
-            {'error': 'Invalid session'},
+            {'error': 'Invalid QR code - Session not found'},
             status=status.HTTP_404_NOT_FOUND
         )
     
     # Check if session is active
+    if session.status != 'active':
+        return Response(
+            {'error': 'This session has ended'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Check if session has expired
     if not session.is_active:
         return Response(
-            {'error': 'Session has expired or ended'},
+            {'error': f'Session expired at {session.end_time.strftime("%I:%M %p")}'},
             status=status.HTTP_400_BAD_REQUEST
         )
     
     # Check if student is enrolled in the class
     if not Enrollment.objects.filter(class_obj=session.class_obj, student=user).exists():
         return Response(
-            {'error': 'You are not enrolled in this class'},
+            {'error': f'You are not enrolled in {session.class_obj.class_code}'},
             status=status.HTTP_403_FORBIDDEN
         )
     
@@ -516,10 +523,10 @@ def mark_attendance(request, session_id):
     existing_record = AttendanceRecord.objects.filter(session=session, student=user).first()
     if existing_record:
         return Response({
-            'message': 'Attendance already marked',
+            'error': 'Attendance already marked',
             'marked_at': existing_record.marked_at,
             'status': existing_record.status
-        })
+        }, status=status.HTTP_400_BAD_REQUEST)
     
     # Mark attendance
     record = AttendanceRecord.objects.create(
@@ -529,9 +536,10 @@ def mark_attendance(request, session_id):
     )
     
     return Response({
-        'message': 'Attendance marked successfully',
-        'session': session.class_obj.class_code,
-        'marked_at': record.marked_at
+        'message': f'Attendance marked for {session.class_obj.class_code}',
+        'class': session.class_obj.class_name,
+        'marked_at': record.marked_at,
+        'status': 'present'
     }, status=status.HTTP_201_CREATED)
 
 
@@ -565,5 +573,84 @@ def end_session(request, session_id):
     return Response({
         'message': 'Session ended successfully',
         'session': SessionSerializer(session).data
+    })
+
+
+# ============================================
+#  STUDENT ENROLLED CLASSES VIEW
+# ============================================
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_student_enrolled_classes(request):
+    """Get all classes the logged-in student is enrolled in"""
+    user = request.user
+    
+    if user.role != 'student':
+        return Response(
+            {'error': 'Only students can view enrolled classes'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Get all enrollments for this student
+    enrollments = Enrollment.objects.filter(
+        student=user
+    ).select_related('class_obj__teacher')
+    
+    classes_data = []
+    for enrollment in enrollments:
+        class_obj = enrollment.class_obj
+        classes_data.append({
+            'id': class_obj.id,
+            'class_code': class_obj.class_code,
+            'class_name': class_obj.class_name,
+            'semester': class_obj.semester,
+            'teacher_name': class_obj.teacher.username,
+            'teacher_email': class_obj.teacher.email,
+            'student_count': class_obj.student_count,
+            'enrolled_at': enrollment.enrolled_at,
+            'created_at': class_obj.created_at,
+        })
+    
+    return Response({
+        'classes': classes_data,
+        'total': len(classes_data)
+    })
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_student_attendance_history(request):
+    """Get attendance history for logged-in student"""
+    user = request.user
+    
+    if user.role != 'student':
+        return Response(
+            {'error': 'Only students can view attendance history'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Get all attendance records for this student
+    records = AttendanceRecord.objects.filter(
+        student=user
+    ).select_related('session__class_obj').order_by('-marked_at')
+    
+    attendance_data = []
+    for record in records:
+        session = record.session
+        attendance_data.append({
+            'id': record.id,
+            'class_code': session.class_obj.class_code,
+            'class_name': session.class_obj.class_name,
+            'semester': session.class_obj.semester,
+            'date': session.start_time.date(),
+            'time': session.start_time.time(),
+            'status': record.status,
+            'marked_at': record.marked_at,
+        })
+    
+    return Response({
+        'attendance': attendance_data,
+        'total': len(attendance_data)
     })
 

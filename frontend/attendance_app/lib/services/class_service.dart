@@ -1,13 +1,16 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/api_config.dart'; 
 
 class ClassService {
-  final String baseUrl = 'http://localhost:8000/api/v1';
+  final String baseUrl = ApiConfig.baseUrl;
   final Dio _dio = Dio();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   ClassService() {
     _dio.options.baseUrl = baseUrl;
+    _dio.options.connectTimeout = ApiConfig.connectionTimeout;
+    _dio.options.receiveTimeout = ApiConfig.receiveTimeout; 
   }
 
   Future<String?> _getToken() async {
@@ -248,6 +251,29 @@ class ClassService {
     } catch (e) {
       print('Error removing student: $e');
       return false;
+    }
+  }
+
+  /// ✅ NEW: Get student's enrolled classes
+  Future<List<Map<String, dynamic>>> getStudentEnrolledClasses() async {
+    try {
+      final token = await _getToken();
+      
+      final response = await _dio.get(
+        '/students/my-classes/',
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+        ),
+      );
+      
+      if (response.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(response.data['classes']);
+      }
+      
+      return [];
+    } catch (e) {
+      print('Error fetching enrolled classes: $e');
+      rethrow;
     }
   }
 }

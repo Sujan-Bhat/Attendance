@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
 import '../../widgets/magical_dashboard_card.dart';
+import '../student/my_classes_screen.dart';
+import '../student/qr_scanner_screen.dart';
 
 class StudentDashboardPage extends StatefulWidget {
   const StudentDashboardPage({super.key});
@@ -19,45 +21,27 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
   final List<Map<String, dynamic>> dashboardCards = [
     {
       'title': 'My Classes',
-      'subtitle': 'View your enrolled classes',
-      'icon': Icons.class_rounded,
-      'color': Colors.teal,
+      'subtitle': 'View enrolled courses',
+      'icon': Icons.school_rounded,
+      'color': Colors.blue,
     },
     {
-      'title': 'Assignments',
-      'subtitle': 'Check pending homework',
-      'icon': Icons.assignment_rounded,
-      'color': Colors.orange,
-    },
-    {
-      'title': 'My Attendance Analysis',
-      'subtitle': 'Track your attendance record',
-      'icon': Icons.grade_rounded,
-      'color': Colors.cyan,
-    },
-    {
-      'title': 'Attendance',
-      'subtitle': 'See attendance history',
-      'icon': Icons.check_circle_rounded,
+      'title': 'Scan QR',
+      'subtitle': 'Mark attendance',
+      'icon': Icons.qr_code_scanner_rounded,
       'color': Colors.green,
     },
     {
-      'title': 'Announcements',
-      'subtitle': 'Latest updates from teachers',
-      'icon': Icons.announcement_rounded,
+      'title': 'Attendance History',
+      'subtitle': 'View past records',
+      'icon': Icons.history_rounded,
       'color': Colors.purple,
     },
     {
-      'title': 'Resources',
-      'subtitle': 'Download study materials',
-      'icon': Icons.folder_rounded,
-      'color': Colors.indigo,
-    },
-    {
       'title': 'Profile',
-      'subtitle': 'Edit your info & settings',
+      'subtitle': 'Manage your account',
       'icon': Icons.person_rounded,
-      'color': Colors.blueGrey,
+      'color': Colors.orange,
     },
   ];
 
@@ -111,6 +95,33 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
       if (mounted) {
         Navigator.pushReplacementNamed(context, '/login');
       }
+    }
+  }
+
+  void _handleCardTap(String title) {
+    switch (title) {
+      case 'My Classes':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const StudentMyClassesScreen(),
+          ),
+        );
+        break;
+
+      case 'Scan QR': 
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const QRScannerScreen(),
+          ),
+        );
+        break;
+
+      default:
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$title - Coming soon!')),
+        );
     }
   }
 
@@ -271,6 +282,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
                                   subtitle: card['subtitle'] as String,
                                   icon: card['icon'] as IconData,
                                   color: card['color'] as Color,
+                                  onTap: () => _handleCardTap(card['title'] as String), // ✅ ADD THIS
                                 );
                               },
                             ),

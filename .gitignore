@@ -1,0 +1,54 @@
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+ENV/
+env/
+
+# Django
+*.sqlite3
+db.sqlite3
+*.log
+media/
+staticfiles/
+
+# Environment variables
+.env
+*.env
+
+# Docker
+docker-compose.override.yml
+
+# Flutter/Dart
+frontend/attendance_app/build/
+frontend/attendance_app/.dart_tool/
+frontend/attendance_app/.packages
+frontend/attendance_app/.flutter-plugins
+frontend/attendance_app/.flutter-plugins-dependencies
+frontend/attendance_app/pubspec.lock
+
+# Android
+frontend/attendance_app/android/local.properties
+frontend/attendance_app/android/.gradle/
+frontend/attendance_app/android/app/google-services.json
+frontend/attendance_app/android/key.properties
+
+# iOS (if applicable)
+frontend/attendance_app/ios/Flutter/flutter_export_environment.sh
+frontend/attendance_app/ios/Pods/
+frontend/attendance_app/ios/.symlinks/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*.iml
+.DS_Store
+
+# Generated APKs (optional - remove if you want to track them)
+*.apk
+*.aab

@@ -32,6 +32,8 @@ from attendance.views import (
     get_session_details,
     mark_attendance,
     end_session,
+    get_student_enrolled_classes,  
+    get_student_attendance_history,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -46,12 +48,15 @@ urlpatterns = [
     path('api/v1/auth/register/', RegisterView.as_view(), name='register'),
     path('api/v1/auth/me/', MeView.as_view(), name='me'),
     
-    # Class management
+    # Class management (Teacher)
     path('api/v1/classes/', class_list_create, name='class_list_create'),
     path('api/v1/classes/<int:class_id>/', class_detail, name='class_detail'),
     path('api/v1/classes/<int:class_id>/students/', get_class_students, name='class_students'),
     path('api/v1/classes/<int:class_id>/add-student/', add_student_to_class, name='add_student'),
     path('api/v1/classes/<int:class_id>/remove-student/<int:student_id>/', remove_student_from_class, name='remove_student'),
+
+    # Student enrolled classes
+    path('api/v1/students/my-classes/', get_student_enrolled_classes, name='student_enrolled_classes'),
     
     # Session management
     path('api/v1/sessions/create/', create_session, name='create_session'),
@@ -62,4 +67,5 @@ urlpatterns = [
     
     # Utility
     path('api/v1/ping/', ping, name='ping'),
+    path('api/v1/students/my-attendance/', get_student_attendance_history, name='student_attendance_history'),
 ]

@@ -80,7 +80,7 @@ flutter doctor
 ### **Step 1: Clone the Repository**
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/attendance.git
+git clone https://github.com/Sujan-Bhat/attendance.git
 cd attendance
 ```
 
@@ -441,6 +441,221 @@ git push origin feature/amazing-feature
 ### 7. Create Pull Request
 
 Go to the original repository and click "New Pull Request"
+
+## 📱 Mobile App Installation
+
+### Building APK for Android
+
+```bash
+cd frontend/attendance_app
+
+# Debug build (for testing)
+flutter build apk --debug
+
+# Release build (for production)
+flutter build apk --release
+
+# Install on connected device
+adb install build/app/outputs/flutter-apk/app-debug.apk
+```
+
+### APK Locations
+- Debug: `build/app/outputs/flutter-apk/app-debug.apk`
+- Release: `build/app/outputs/flutter-apk/app-release.apk`
+
+---
+
+## 🔧 Troubleshooting
+
+### Backend Issues
+
+**Port 8000 already in use:**
+```bash
+sudo lsof -i :8000
+sudo kill -9 <PID>
+```
+
+**Database connection failed:**
+```bash
+docker-compose down
+docker-compose up -d db
+# Wait 10 seconds, then:
+docker-compose up web
+```
+
+### Frontend Issues
+
+**Flutter dependencies error:**
+```bash
+cd frontend/attendance_app
+flutter clean
+flutter pub get
+```
+
+**Android build fails:**
+```bash
+cd android
+./gradlew clean
+cd ..
+flutter build apk --debug
+```
+
+**NDK license error:**
+```bash
+# Accept Android SDK licenses
+yes | sdkmanager --licenses
+
+# Or manually create license file
+sudo mkdir -p /usr/lib/android-sdk/licenses
+echo "24333f8a63b6825ea9c5514f83c2829b004d1fee" | sudo tee /usr/lib/android-sdk/licenses/android-sdk-license
+```
+
+### Docker Issues
+
+**Container fails to start:**
+```bash
+docker-compose down
+docker system prune -a  # Warning: removes all unused images
+docker-compose up --build
+```
+
+**pgAdmin not accessible:**
+```bash
+# Check pgAdmin logs
+docker-compose logs pgadmin
+
+# Restart pgAdmin
+docker-compose restart pgadmin
+```
+
+---
+
+## 🔐 Security Notes
+
+### For Production Deployment:
+
+1. **Change SECRET_KEY** in `.env`:
+   ```bash
+   python -c "from django.core.management.utils import get_random_secret_key; print(get_random_secret_key())"
+   ```
+
+2. **Set DEBUG=False** in production
+
+3. **Use strong database passwords**
+
+4. **Enable HTTPS** for API endpoints
+
+5. **Configure CORS** properly:
+   ```python
+   # backend/attend_backend/settings.py
+   CORS_ALLOWED_ORIGINS = [
+       "https://yourdomain.com",
+   ]
+   ```
+
+6. **Use environment variables** for sensitive data (never commit `.env` files)
+
+---
+
+## 📊 Admin Panel Access
+
+After creating superuser, access:
+
+**Django Admin**: http://localhost:8000/admin/
+
+Available sections:
+- **Users**: Manage all users (students, teachers, admins)
+- **Classes**: View and manage all classes
+- **Enrollments**: Student class enrollments
+- **Attendance sessions**: QR code sessions
+- **Attendance records**: All marked attendance
+
+---
+
+## 🌐 API Testing
+
+### Using cURL
+
+```bash
+# Register a user
+curl -X POST http://localhost:8000/api/v1/auth/register/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "testuser",
+    "email": "test@example.com",
+    "password": "securepass123",
+    "role": "student"
+  }'
+
+# Login
+curl -X POST http://localhost:8000/api/v1/auth/token/ \
+  -H "Content-Type: application/json" \
+  -d '{
+    "username": "testuser",
+    "password": "securepass123"
+  }'
+
+# Use the access token
+curl -X GET http://localhost:8000/api/v1/auth/me/ \
+  -H "Authorization: Bearer YOUR_ACCESS_TOKEN"
+```
+
+### Using Postman
+
+1. Import API collection (create a `postman_collection.json`)
+2. Set base URL: `http://localhost:8000/api/v1`
+3. Add Authorization header with JWT token
+
+---
+
+## 📱 Mobile App Features
+
+### QR Code Scanning
+- Real-time QR code detection
+- Automatic attendance marking
+- Session validation
+- Duplicate scan prevention
+
+### Dashboard
+- Attendance history
+- Enrolled classes
+- Session status
+- Profile management
+
+---
+
+## 🎯 Roadmap
+
+- [ ] Email notifications for attendance
+- [ ] Geolocation verification
+- [ ] Face recognition (optional)
+- [ ] Attendance analytics dashboard
+- [ ] Export reports (PDF/Excel)
+- [ ] Push notifications
+- [ ] Multiple language support
+- [ ] Dark mode
+- [ ] Offline mode support
+
+---
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+
+---
+
+## 👥 Authors
+
+- **Your Name** - *Initial work* - [YourGitHub](https://github.com/YOUR_USERNAME)
+
+---
+
+## 🙏 Acknowledgments
+
+- Django REST Framework documentation
+- Flutter documentation
+- Docker documentation
+- QR code libraries contributors
 
 
 

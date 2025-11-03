@@ -36,7 +36,7 @@ services:
     volumes:
       - ./backend:/code
     ports:
-      - "8000:8000"
+      - "0.0.0.0:8000:8000"
     env_file:
       - ./backend/.env
     depends_on:

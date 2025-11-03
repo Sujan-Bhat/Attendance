@@ -1,11 +1,26 @@
 class ApiConfig {
-  static const String baseUrl = 'http://localhost:8000/api/v1';
+  //  Use your actual local IP
+  static const String _localIp = '192.168.1.7';
+
+  // Choose based on where you're running
+  static const String _computerBaseUrl = 'http://localhost:8000/api/v1';
+  static const String _androidBaseUrl = 'http://$_localIp:8000/api/v1';
+  
+  // Auto-detect or manually set
+  static String get baseUrl {
+    // For now, use local IP for both (works everywhere)
+    return _androidBaseUrl;
+  }
+  
+  // Connection settings
+  static const Duration connectionTimeout = Duration(seconds: 30);
+  static const Duration receiveTimeout = Duration(seconds: 30);
   
   // Auth endpoints
-  static const String login = '$baseUrl/auth/token/';
-  static const String register = '$baseUrl/auth/register/';
-  static const String me = '$baseUrl/auth/me/';
-  static const String tokenRefresh = '$baseUrl/auth/token/refresh/';
+  static String login = '$baseUrl/auth/token/';
+  static String register = '$baseUrl/auth/register/';
+  static String me = '$baseUrl/auth/me/';
+  static String tokenRefresh = '$baseUrl/auth/token/refresh/';
   
   // Headers
   static Map<String, String> get headers => {

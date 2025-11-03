@@ -1,15 +1,16 @@
 import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import '../config/api_config.dart';
 
 class SessionService {
-  final String baseUrl = 'http://localhost:8000/api/v1';
+  final String baseUrl = ApiConfig.baseUrl; 
   final Dio _dio = Dio();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
 
   SessionService() {
     _dio.options.baseUrl = baseUrl;
-    _dio.options.connectTimeout = const Duration(seconds: 10);
-    _dio.options.receiveTimeout = const Duration(seconds: 10);
+    _dio.options.connectTimeout = ApiConfig.connectionTimeout;
+    _dio.options.receiveTimeout = ApiConfig.receiveTimeout;
   }
 
   Future<String?> _getToken() async {

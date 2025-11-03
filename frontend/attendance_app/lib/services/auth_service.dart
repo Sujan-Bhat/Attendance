@@ -3,18 +3,18 @@ import 'package:dio/dio.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
+import '../config/api_config.dart';
 
 class AuthService {
-  // make POST request to /auth/token/ to get JWT tokens
-  final String baseUrl = 'http://localhost:8000/api/v1'; 
+  final String baseUrl = ApiConfig.baseUrl;
   final Dio _dio = Dio();
   final FlutterSecureStorage _storage = const FlutterSecureStorage();
   late SharedPreferences _prefs;
 
   AuthService() {
     _dio.options.baseUrl = baseUrl;
-    _dio.options.connectTimeout = const Duration(seconds: 5);
-    _dio.options.receiveTimeout = const Duration(seconds: 3);
+    _dio.options.connectTimeout = ApiConfig.connectionTimeout; 
+    _dio.options.receiveTimeout = ApiConfig.receiveTimeout; 
 
     _dio.interceptors.add(InterceptorsWrapper(
       onRequest: (options, handler) async {
