@@ -19,14 +19,14 @@ class UserAdmin(BaseUserAdmin):
 @admin.register(StudentProfile)
 class StudentProfileAdmin(admin.ModelAdmin):
     list_display = ('get_username', 'roll_no', 'get_email')
-    search_fields = ('student_name__username', 'roll_no', 'student_name__email')  # Fixed: was 'user__'
+    search_fields = ('student__username', 'roll_no', 'student__email')  # Fixed: was 'user__'
     
     def get_username(self, obj):
-        return obj.student_name.username  # Fixed: was obj.user.username
+        return obj.student.username  # Fixed: was obj.user.username
     get_username.short_description = 'Username'
     
     def get_email(self, obj):
-        return obj.student_name.email  # Fixed: was obj.user.email
+        return obj.student.email  # Fixed: was obj.user.email
     get_email.short_description = 'Email'
 
 

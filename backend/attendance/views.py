@@ -234,7 +234,9 @@ def get_class_students(request, class_id):
 @permission_classes([permissions.IsAuthenticated])
 def add_student_to_class(request, class_id):
     """
-    Add a single student to an existing class
+    Add a student to an existing class
+    - If student exists: just enroll them
+    - If student is new: create user, profile, and enroll
     """
     user = request.user
     
@@ -249,7 +251,7 @@ def add_student_to_class(request, class_id):
     student_data = request.data
     
     # Validate required fields
-    required_fields = ['name', 'email', 'password', 'rollNo']
+    required_fields = ['email']
     for field in required_fields:
         if field not in student_data:
             return Response(
@@ -257,60 +259,105 @@ def add_student_to_class(request, class_id):
                 status=status.HTTP_400_BAD_REQUEST
             )
     
-    # Check if email exists
-    if User.objects.filter(email=student_data['email']).exists():
-        return Response(
-            {'error': f"Email {student_data['email']} already exists"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
-    
-    # Check if roll number exists
-    if StudentProfile.objects.filter(roll_no=student_data['rollNo']).exists():
-        return Response(
-            {'error': f"Roll number {student_data['rollNo']} already exists"},
-            status=status.HTTP_400_BAD_REQUEST
-        )
+    email = student_data['email']
     
     try:
         with transaction.atomic():
-            # Generate unique username from email
-            email = student_data['email']
-            username = email.split('@')[0]
-            base_username = username
-            counter = 1
-            while User.objects.filter(username=username).exists():
-                username = f"{base_username}{counter}"
-                counter += 1
+            # Check if user already exists
+            existing_user = User.objects.filter(email=email).first()
             
-            # Create user
-            student = User.objects.create_user(
-                username=username,
-                email=email,
-                password=student_data['password'],
-                role='student'
-            )
+            if existing_user:
+                # User exists - just enroll them in this class
+                if existing_user.role != 'student':
+                    return Response(
+                        {'error': f'{email} is not a student account'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Check if already enrolled
+                if Enrollment.objects.filter(class_obj=class_obj, student=existing_user).exists():
+                    return Response(
+                        {'error': f'Student already enrolled in this class'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Enroll existing student
+                Enrollment.objects.create(
+                    class_obj=class_obj,
+                    student=existing_user
+                )
+                
+                try:
+                    roll_no = existing_user.student_profile.roll_no
+                except:
+                    roll_no = 'N/A'
+                
+                return Response({
+                    'message': f"Student {existing_user.username} enrolled successfully",
+                    'student': {
+                        'id': existing_user.id,
+                        'username': existing_user.username,
+                        'email': existing_user.email,
+                        'roll_no': roll_no,
+                        'status': 'existing'
+                    }
+                }, status=status.HTTP_201_CREATED)
             
-            # Create student profile
-            StudentProfile.objects.create(
-                student_name=student,
-                roll_no=student_data['rollNo']
-            )
-            
-            # Enroll in class
-            Enrollment.objects.create(
-                class_obj=class_obj,
-                student=student
-            )
-            
-            return Response({
-                'message': f"Student {student_data['name']} added successfully",
-                'student': {
-                    'id': student.id,
-                    'username': student.username,
-                    'email': student.email,
-                    'roll_no': student_data['rollNo']
-                }
-            }, status=status.HTTP_201_CREATED)
+            else:
+                # New student - create user and profile
+                required_for_new = ['name', 'password', 'rollNo']
+                for field in required_for_new:
+                    if field not in student_data:
+                        return Response(
+                            {'error': f'Missing required field for new student: {field}'},
+                            status=status.HTTP_400_BAD_REQUEST
+                        )
+                
+                # Check if roll number exists
+                if StudentProfile.objects.filter(roll_no=student_data['rollNo']).exists():
+                    return Response(
+                        {'error': f"Roll number {student_data['rollNo']} already exists"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Generate unique username from email
+                username = email.split('@')[0]
+                base_username = username
+                counter = 1
+                while User.objects.filter(username=username).exists():
+                    username = f"{base_username}{counter}"
+                    counter += 1
+                
+                # Create user
+                student = User.objects.create_user(
+                    username=username,
+                    email=email,
+                    password=student_data['password'],
+                    role='student'
+                )
+                
+                # Create student profile (FIXED)
+                StudentProfile.objects.create(
+                    student=student,  # ✅ Correct field name
+                    roll_no=student_data['rollNo']
+                )
+                
+                # Enroll in class
+                Enrollment.objects.create(
+                    class_obj=class_obj,
+                    student=student
+                )
+                
+                return Response({
+                    'message': f"New student {student_data['name']} created and enrolled",
+                    'student': {
+                        'id': student.id,
+                        'username': student.username,
+                        'email': student.email,
+                        'roll_no': student_data['rollNo'],
+                        'status': 'new'
+                    }
+                }, status=status.HTTP_201_CREATED)
     
     except Exception as e:
         return Response({

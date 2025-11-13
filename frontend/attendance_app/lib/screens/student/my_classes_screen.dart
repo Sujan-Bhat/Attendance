@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/class_service.dart';
+import 'attendance_history_screen.dart';
 
 class StudentMyClassesScreen extends StatefulWidget {
   const StudentMyClassesScreen({super.key});
@@ -8,8 +9,9 @@ class StudentMyClassesScreen extends StatefulWidget {
   State<StudentMyClassesScreen> createState() => _StudentMyClassesScreenState();
 }
 
-class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
+class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> with SingleTickerProviderStateMixin {
   final ClassService _classService = ClassService();
+  late AnimationController _animationController;
   
   List<Map<String, dynamic>> enrolledClasses = [];
   bool isLoading = true;
@@ -18,7 +20,17 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
   @override
   void initState() {
     super.initState();
+    _animationController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
     _loadEnrolledClasses();
+  }
+
+  @override
+  void dispose() {
+    _animationController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadEnrolledClasses() async {
@@ -35,6 +47,7 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
           enrolledClasses = classes;
           isLoading = false;
         });
+        _animationController.forward();
       }
     } catch (e) {
       if (mounted) {
@@ -48,10 +61,8 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // ✅ RESPONSIVE BREAKPOINTS
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
-    final isTablet = screenW >= 600 && screenW < 1024;
 
     return Scaffold(
       body: Container(
@@ -65,76 +76,15 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
         child: SafeArea(
           child: Column(
             children: [
-              // ✅ TOP APP BAR
-              Container(
-                width: double.infinity,
-                padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 12 : 20,
-                  vertical: isMobile ? 10 : 14,
-                ),
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [Color(0xFF007C91), Color(0xFF0097A7)],
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black26,
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    IconButton(
-                      icon: Icon(
-                        Icons.arrow_back_rounded,
-                        color: Colors.white,
-                        size: isMobile ? 24 : 28,
-                      ),
-                      onPressed: () => Navigator.pop(context),
-                      tooltip: 'Back',
-                    ),
-                    SizedBox(width: isMobile ? 4 : 8),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'My Classes',
-                            style: TextStyle(
-                              color: Colors.white,
-                              fontSize: isMobile ? 18 : 22,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 0.6,
-                            ),
-                          ),
-                          if (!isMobile)
-                            const Text(
-                              'Your enrolled courses',
-                              style: TextStyle(color: Colors.white70, fontSize: 14),
-                            ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      icon: Icon(
-                        Icons.refresh_rounded,
-                        color: Colors.white,
-                        size: isMobile ? 24 : 28,
-                      ),
-                      onPressed: _loadEnrolledClasses,
-                      tooltip: 'Refresh',
-                    ),
-                  ],
-                ),
-              ),
+              // Modern App Bar
+              _buildModernAppBar(isMobile),
 
-              // ✅ MAIN CONTENT
+              // Main Content
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _loadEnrolledClasses,
-                  child: _buildBody(isMobile, isTablet),
+                  color: const Color(0xFF007C91),
+                  child: _buildBody(isMobile),
                 ),
               ),
             ],
@@ -144,17 +94,106 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     );
   }
 
-  Widget _buildBody(bool isMobile, bool isTablet) {
+  Widget _buildModernAppBar(bool isMobile) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: isMobile ? 16 : 20,
+        vertical: isMobile ? 12 : 16,
+      ),
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: const Icon(
+                Icons.arrow_back_ios_new_rounded,
+                color: Colors.white,
+                size: 20,
+              ),
+              onPressed: () => Navigator.pop(context),
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'My Classes',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: isMobile ? 22 : 26,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '${enrolledClasses.length} ${enrolledClasses.length == 1 ? 'course' : 'courses'} enrolled',
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.85),
+                    fontSize: isMobile ? 13 : 14,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: IconButton(
+              icon: const Icon(
+                Icons.refresh_rounded,
+                color: Colors.white,
+                size: 22,
+              ),
+              onPressed: _loadEnrolledClasses,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBody(bool isMobile) {
     if (isLoading) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            CircularProgressIndicator(color: Colors.white),
-            SizedBox(height: 16),
+            SizedBox(
+              width: 60,
+              height: 60,
+              child: CircularProgressIndicator(
+                strokeWidth: 3,
+                valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+              ),
+            ),
+            const SizedBox(height: 24),
             Text(
-              'Loading classes...',
-              style: TextStyle(color: Colors.white70, fontSize: 16),
+              'Loading your classes...',
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.9),
+                fontSize: 16,
+                fontWeight: FontWeight.w500,
+              ),
             ),
           ],
         ),
@@ -164,36 +203,53 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     if (errorMessage != null) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(32.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.error_outline_rounded,
-                size: isMobile ? 64 : 80,
-                color: Colors.white70,
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.error_outline_rounded,
+                  size: 64,
+                  color: Colors.white,
+                ),
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 24),
+              Text(
+                'Oops!',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 28,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 12),
               Text(
                 errorMessage!,
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white,
-                  fontSize: isMobile ? 14 : 16,
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 16,
                 ),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: 32),
               ElevatedButton.icon(
                 onPressed: _loadEnrolledClasses,
                 icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Retry'),
+                label: const Text('Try Again'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.white,
                   foregroundColor: const Color(0xFF007C91),
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(16),
                   ),
+                  elevation: 8,
                 ),
               ),
             ],
@@ -205,31 +261,39 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     if (enrolledClasses.isEmpty) {
       return Center(
         child: Padding(
-          padding: const EdgeInsets.all(24.0),
+          padding: const EdgeInsets.all(32.0),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.school_outlined,
-                size: isMobile ? 80 : 100,
-                color: Colors.white70,
+              Container(
+                padding: const EdgeInsets.all(32),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.school_outlined,
+                  size: 80,
+                  color: Colors.white,
+                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 32),
               Text(
-                'No Classes Enrolled',
+                'No Classes Yet',
                 style: TextStyle(
                   color: Colors.white,
-                  fontSize: isMobile ? 20 : 24,
+                  fontSize: 28,
                   fontWeight: FontWeight.bold,
                 ),
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Text(
-                'You are not enrolled in any classes yet.\nContact your teacher to get enrolled.',
+                'You haven\'t enrolled in any classes.\nContact your teacher to get started!',
                 textAlign: TextAlign.center,
                 style: TextStyle(
-                  color: Colors.white70,
-                  fontSize: isMobile ? 14 : 16,
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 16,
+                  height: 1.5,
                 ),
               ),
             ],
@@ -239,17 +303,43 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     }
 
     return ListView.builder(
-      padding: EdgeInsets.all(isMobile ? 12 : 16),
+      padding: EdgeInsets.all(isMobile ? 16 : 20),
       physics: const BouncingScrollPhysics(),
       itemCount: enrolledClasses.length,
       itemBuilder: (context, index) {
-        final classData = enrolledClasses[index];
-        return _buildClassCard(classData, isMobile, isTablet);
+        return FadeTransition(
+          opacity: Tween<double>(begin: 0, end: 1).animate(
+            CurvedAnimation(
+              parent: _animationController,
+              curve: Interval(
+                (index / enrolledClasses.length) * 0.5,
+                1.0,
+                curve: Curves.easeOut,
+              ),
+            ),
+          ),
+          child: SlideTransition(
+            position: Tween<Offset>(
+              begin: const Offset(0, 0.2),
+              end: Offset.zero,
+            ).animate(
+              CurvedAnimation(
+                parent: _animationController,
+                curve: Interval(
+                  (index / enrolledClasses.length) * 0.5,
+                  1.0,
+                  curve: Curves.easeOut,
+                ),
+              ),
+            ),
+            child: _buildModernClassCard(enrolledClasses[index], isMobile),
+          ),
+        );
       },
     );
   }
 
-  Widget _buildClassCard(Map<String, dynamic> classData, bool isMobile, bool isTablet) {
+  Widget _buildModernClassCard(Map<String, dynamic> classData, bool isMobile) {
     final classCode = classData['class_code'] ?? 'N/A';
     final className = classData['class_name'] ?? 'Unknown Class';
     final semester = classData['semester'] ?? 'N/A';
@@ -257,245 +347,364 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     final studentCount = classData['student_count'] ?? 0;
     final enrolledAt = classData['enrolled_at'] ?? 'N/A';
 
-    // Generate color from class code
-    final colorIndex = classCode.hashCode % _cardColors.length;
-    final cardColor = _cardColors[colorIndex.abs()];
-
-    return Card(
-      margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
-      elevation: 8,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: InkWell(
-        onTap: () => _showClassDetails(classData),
-        borderRadius: BorderRadius.circular(16),
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(16),
-            gradient: LinearGradient(
-              colors: [cardColor.withOpacity(0.1), Colors.white],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
+    return Container(
+      margin: const EdgeInsets.only(bottom: 20),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: [Colors.white, Colors.white.withOpacity(0.95)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF007C91).withOpacity(0.2),
+            blurRadius: 15,
+            offset: const Offset(0, 8),
           ),
-          padding: EdgeInsets.all(isMobile ? 16 : 20),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Row(
-                children: [
-                  Container(
-                    padding: EdgeInsets.all(isMobile ? 10 : 12),
-                    decoration: BoxDecoration(
-                      color: cardColor.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Icon(
-                      Icons.class_rounded,
-                      color: cardColor,
-                      size: isMobile ? 24 : 28,
-                    ),
-                  ),
-                  SizedBox(width: isMobile ? 12 : 16),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          classCode,
-                          style: TextStyle(
-                            fontSize: isMobile ? 16 : 18,
-                            fontWeight: FontWeight.bold,
-                            color: cardColor,
-                          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          onTap: () => _showModernClassDetails(classData),
+          borderRadius: BorderRadius.circular(20),
+          child: Padding(
+            padding: EdgeInsets.all(isMobile ? 16 : 20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header with icon
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
                         ),
-                        Text(
-                          className,
-                          style: TextStyle(
-                            fontSize: isMobile ? 14 : 16,
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF1F2937),
+                        borderRadius: BorderRadius.circular(14),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF007C91).withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
                           ),
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.auto_stories_rounded,
+                        color: Colors.white,
+                        size: isMobile ? 26 : 28,
+                      ),
                     ),
-                  ),
-                ],
-              ),
-              
-              SizedBox(height: isMobile ? 12 : 16),
-              const Divider(height: 1),
-              SizedBox(height: isMobile ? 12 : 16),
+                    const SizedBox(width: 16),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF007C91).withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: const Color(0xFF007C91).withOpacity(0.3),
+                                width: 1,
+                              ),
+                            ),
+                            child: Text(
+                              classCode,
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Color(0xFF007C91),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            className,
+                            style: TextStyle(
+                              fontSize: isMobile ? 17 : 18,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.grey.shade800,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                
+                const SizedBox(height: 18),
 
-              // Details Grid
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildInfoChip(
-                      Icons.calendar_today_rounded,
-                      'Semester',
-                      semester,
-                      Colors.blue,
-                      isMobile,
+                // Info chips
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    _buildInfoChip(
+                      Icons.calendar_month_rounded,
+                      'Semester $semester',
                     ),
-                  ),
-                  SizedBox(width: isMobile ? 8 : 12),
-                  Expanded(
-                    child: _buildInfoChip(
-                      Icons.person_rounded,
-                      'Teacher',
+                    _buildInfoChip(
+                      Icons.person_outline_rounded,
                       teacherName,
-                      Colors.purple,
-                      isMobile,
                     ),
-                  ),
-                ],
-              ),
+                  ],
+                ),
 
-              SizedBox(height: isMobile ? 8 : 12),
+                const SizedBox(height: 14),
 
-              Row(
-                children: [
-                  Expanded(
-                    child: _buildInfoChip(
-                      Icons.people_rounded,
-                      'Students',
-                      '$studentCount enrolled',
-                      Colors.green,
-                      isMobile,
-                    ),
+                // Bottom row
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade50,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  SizedBox(width: isMobile ? 8 : 12),
-                  Expanded(
-                    child: _buildInfoChip(
-                      Icons.access_time_rounded,
-                      'Joined',
-                      _formatDate(enrolledAt),
-                      Colors.orange,
-                      isMobile,
-                    ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.people_outline_rounded,
+                            size: 18,
+                            color: Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            '$studentCount students',
+                            style: TextStyle(
+                              fontSize: 13,
+                              color: Colors.grey.shade700,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.access_time_rounded,
+                            size: 16,
+                            color: Colors.grey.shade600,
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            _formatDate(enrolledAt),
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: Colors.grey.shade600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildInfoChip(IconData icon, String label, String value, Color color, bool isMobile) {
+  Widget _buildInfoChip(IconData icon, String label) {
     return Container(
-      padding: EdgeInsets.all(isMobile ? 8 : 10),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
+        color: const Color(0xFF007C91).withOpacity(0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withOpacity(0.3)),
+        border: Border.all(
+          color: const Color(0xFF007C91).withOpacity(0.2),
+          width: 1,
+        ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Icon(icon, size: isMobile ? 14 : 16, color: color),
-              const SizedBox(width: 4),
-              Expanded(
-                child: Text(
-                  label,
-                  style: TextStyle(
-                    fontSize: isMobile ? 10 : 11,
-                    color: Colors.grey[600],
-                    fontWeight: FontWeight.w500,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 4),
+          Icon(icon, size: 16, color: const Color(0xFF007C91)),
+          const SizedBox(width: 6),
           Text(
-            value,
+            label,
             style: TextStyle(
-              fontSize: isMobile ? 11 : 12,
-              fontWeight: FontWeight.bold,
-              color: const Color(0xFF1F2937),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: Colors.grey.shade700,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
         ],
       ),
     );
   }
 
-  void _showClassDetails(Map<String, dynamic> classData) {
+  void _showModernClassDetails(Map<String, dynamic> classData) {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (context) => DraggableScrollableSheet(
-        initialChildSize: 0.6,
-        minChildSize: 0.4,
-        maxChildSize: 0.9,
-        builder: (_, controller) => Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      builder: (context) => Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.white, Colors.grey.shade50],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
-          padding: const EdgeInsets.all(24),
-          child: ListView(
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        ),
+        child: DraggableScrollableSheet(
+          initialChildSize: 0.7,
+          minChildSize: 0.5,
+          maxChildSize: 0.9,
+          builder: (_, controller) => ListView(
             controller: controller,
+            padding: const EdgeInsets.all(24),
             children: [
+              // Handle
               Center(
                 child: Container(
-                  width: 40,
-                  height: 4,
+                  width: 50,
+                  height: 5,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
-                    borderRadius: BorderRadius.circular(2),
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(10),
                   ),
                 ),
               ),
-              const SizedBox(height: 20),
-              Text(
-                classData['class_code'] ?? 'N/A',
-                style: const TextStyle(
-                  fontSize: 24,
-                  fontWeight: FontWeight.bold,
-                  color: Color(0xFF007C91),
+              const SizedBox(height: 24),
+
+              // Header
+              Container(
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF007C91).withOpacity(0.3),
+                      blurRadius: 20,
+                      offset: const Offset(0, 10),
+                    ),
+                  ],
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.3),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Text(
+                        classData['class_code'] ?? 'N/A',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      classData['class_name'] ?? 'Unknown Class',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(height: 8),
-              Text(
-                classData['class_name'] ?? 'Unknown Class',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w600,
-                  color: Color(0xFF1F2937),
-                ),
+
+              const SizedBox(height: 24),
+
+              // Details
+              _buildDetailCard(
+                Icons.calendar_today_rounded,
+                'Semester',
+                classData['semester'] ?? 'N/A',
               ),
+              _buildDetailCard(
+                Icons.person_rounded,
+                'Teacher',
+                classData['teacher_name'] ?? 'N/A',
+              ),
+              _buildDetailCard(
+                Icons.people_rounded,
+                'Total Students',
+                '${classData['student_count'] ?? 0} enrolled',
+              ),
+              _buildDetailCard(
+                Icons.access_time_rounded,
+                'Enrolled On',
+                _formatDate(classData['enrolled_at']),
+              ),
+
               const SizedBox(height: 24),
-              _buildDetailRow(Icons.calendar_today, 'Semester', classData['semester'] ?? 'N/A'),
-              _buildDetailRow(Icons.person, 'Teacher', classData['teacher_name'] ?? 'N/A'),
-              _buildDetailRow(Icons.people, 'Total Students', '${classData['student_count'] ?? 0}'),
-              _buildDetailRow(Icons.access_time, 'Enrolled On', _formatDate(classData['enrolled_at'])),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  Navigator.pop(context);
-                  // TODO: Navigate to attendance history
-                },
-                icon: const Icon(Icons.history_rounded),
-                label: const Text('View Attendance History'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF007C91),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
+
+              // Action Button
+              Container(
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+                  ),
+                  borderRadius: BorderRadius.circular(16),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF007C91).withOpacity(0.3),
+                      blurRadius: 15,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: ElevatedButton.icon(
+                  onPressed: () {
+                    Navigator.pop(context);
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (context) => const AttendanceHistoryScreen(),
+                      ),
+                    );
+                  },
+                  icon: const Icon(Icons.history_rounded, color: Colors.white),
+                  label: const Text(
+                    'View Attendance History',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.transparent,
+                    shadowColor: Colors.transparent,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(16),
+                    ),
                   ),
                 ),
               ),
@@ -506,13 +715,33 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     );
   }
 
-  Widget _buildDetailRow(IconData icon, String label, String value) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+  Widget _buildDetailCard(IconData icon, String label, String value) {
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.grey.shade100,
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
       child: Row(
         children: [
-          Icon(icon, size: 20, color: Colors.grey[600]),
-          const SizedBox(width: 12),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF007C91).withOpacity(0.1),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: const Color(0xFF007C91), size: 24),
+          ),
+          const SizedBox(width: 16),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -521,15 +750,17 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
                   label,
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    color: Colors.grey.shade600,
+                    fontWeight: FontWeight.w500,
                   ),
                 ),
+                const SizedBox(height: 4),
                 Text(
                   value,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                    color: Color(0xFF1F2937),
+                    fontWeight: FontWeight.bold,
+                    color: Colors.grey.shade800,
                   ),
                 ),
               ],
@@ -544,19 +775,9 @@ class _StudentMyClassesScreenState extends State<StudentMyClassesScreen> {
     if (date == null) return 'N/A';
     try {
       final dateTime = DateTime.parse(date.toString());
-      return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+      return '${dateTime.day.toString().padLeft(2, '0')}/${dateTime.month.toString().padLeft(2, '0')}/${dateTime.year.toString().substring(2)}';
     } catch (e) {
       return date.toString();
     }
   }
-
-  // Card colors for visual variety
-  static const List<Color> _cardColors = [
-    Color(0xFF007C91), // Teal
-    Color(0xFF6366F1), // Indigo
-    Color(0xFFEC4899), // Pink
-    Color(0xFF10B981), // Green
-    Color(0xFFF59E0B), // Orange
-    Color(0xFF8B5CF6), // Purple
-  ];
 }

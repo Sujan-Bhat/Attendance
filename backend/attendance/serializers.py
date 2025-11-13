@@ -97,13 +97,13 @@ class LoginSerializer(serializers.Serializer):
 
 class StudentProfileSerializer(serializers.ModelSerializer):
     """Serializers for StudentProfile model"""
-    username = serializers.CharField(source='student_name.username', read_only=True)
-    email = serializers.EmailField(source='student_name.email', read_only=True)
+    username = serializers.CharField(source='student.username', read_only=True)
+    email = serializers.EmailField(source='student.email', read_only=True)
 
     class Meta:
         model = StudentProfile
-        fields = ('student_name', 'username', 'email', 'roll_no')
-        read_only_fields = ('student_name',)  # Fixed typo: was 'studen_name'
+        fields = ('student', 'username', 'email', 'roll_no')
+        read_only_fields = ('student',)
 
 
 class StudentCreateSerializer(serializers.Serializer):  # Changed from ModelSerializer
@@ -128,10 +128,10 @@ class StudentCreateSerializer(serializers.Serializer):  # Changed from ModelSeri
 
 class StudentDetailSerializer(serializers.ModelSerializer):
     """Serializer for student details in class"""
-    username = serializers.CharField(source='student_name.username', read_only=True)  # Fixed: was 'student.username'
-    email = serializers.EmailField(source='student_name.email', read_only=True)  # Fixed: was 'student.email'
+    username = serializers.CharField(source='student.username', read_only=True)  # Fixed: was 'student.username'
+    email = serializers.EmailField(source='student.email', read_only=True)  # Fixed: was 'student.email'
     roll_no = serializers.CharField(read_only=True)
-    user_id = serializers.IntegerField(source='student_name.id', read_only=True)  # Fixed: was 'student.id'
+    user_id = serializers.IntegerField(source='student.id', read_only=True)  # Fixed: was 'student.id'
 
     class Meta:
         model = StudentProfile
@@ -233,7 +233,7 @@ class CreateClassSerializer(serializers.Serializer):  # Changed from ModelSerial
                 
                 # Create StudentProfile
                 StudentProfile.objects.create(
-                    student_name=user,
+                    student=user,
                     roll_no=student_data['rollNo']
                 )
                 

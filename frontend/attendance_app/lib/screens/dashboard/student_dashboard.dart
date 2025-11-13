@@ -3,6 +3,7 @@ import '../../services/auth_service.dart';
 import '../../widgets/magical_dashboard_card.dart';
 import '../student/my_classes_screen.dart';
 import '../student/qr_scanner_screen.dart';
+import '../student/attendance_history_screen.dart';
 
 class StudentDashboardPage extends StatefulWidget {
   const StudentDashboardPage({super.key});
@@ -117,6 +118,15 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
           ),
         );
         break;
+
+      case 'Attendance History':
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (context) => const AttendanceHistoryScreen(),
+            ),
+          );
+          break;
 
       default:
         ScaffoldMessenger.of(context).showSnackBar(
