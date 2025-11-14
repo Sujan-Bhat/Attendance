@@ -1,13 +1,13 @@
 import 'package:flutter/material.dart';
 
-class MagicalDashboardCard extends StatefulWidget {
+class EnhancedDashboardCard extends StatefulWidget {
   final String title;
   final String subtitle;
   final IconData icon;
   final Color color;
   final VoidCallback? onTap;
 
-  const MagicalDashboardCard({
+  const EnhancedDashboardCard({
     super.key,
     required this.title,
     required this.subtitle,
@@ -17,10 +17,10 @@ class MagicalDashboardCard extends StatefulWidget {
   });
 
   @override
-  State<MagicalDashboardCard> createState() => _MagicalDashboardCardState();
+  State<EnhancedDashboardCard> createState() => _EnhancedDashboardCardState();
 }
 
-class _MagicalDashboardCardState extends State<MagicalDashboardCard>
+class _EnhancedDashboardCardState extends State<EnhancedDashboardCard>
     with TickerProviderStateMixin, WidgetsBindingObserver {
   bool _hover = false;
   bool _pressed = false;
@@ -36,7 +36,9 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
 
     _pulseController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 1500),
+      duration: const Duration(milliseconds: 1200),
+      lowerBound: 0.985,
+      upperBound: 1.02,
     )..addStatusListener((status) {
         if (!mounted || !_isVisible) return;
         
@@ -57,11 +59,8 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    
-    // Stop animations before disposing
     _pulseController.stop();
     _shimmerController.stop();
-    
     _pulseController.dispose();
     _shimmerController.dispose();
     super.dispose();
@@ -81,24 +80,17 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
 
   void _pauseAnimations() {
     _isVisible = false;
-    if (_pulseController.isAnimating) {
-      _pulseController.stop();
-    }
-    if (_shimmerController.isAnimating) {
-      _shimmerController.stop();
-    }
+    if (_pulseController.isAnimating) _pulseController.stop();
+    if (_shimmerController.isAnimating) _shimmerController.stop();
   }
 
   void _resumeAnimations() {
     _isVisible = true;
-    if (!_pulseController.isAnimating) {
-      _pulseController.forward();
-    }
+    if (!_pulseController.isAnimating) _pulseController.forward();
   }
 
   void _startShimmer() {
     if (!mounted) return;
-    
     if (_shimmerController.status == AnimationStatus.dismissed) {
       _shimmerController.repeat();
     }
@@ -106,7 +98,6 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
 
   void _stopShimmer() {
     if (!mounted) return;
-    
     _shimmerController.stop();
     _shimmerController.reset();
   }
@@ -116,10 +107,10 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
     final bool isMobile = MediaQuery.of(context).size.width < 600;
 
     final double targetScale = (_hover || _pressed)
-        ? (isMobile ? 1.01 : 1.03)
+        ? (isMobile ? 1.015 : 1.04)
         : 1.0;
-    final double lift = (_hover || _pressed) ? -6 : 0;
-    final double radius = isMobile ? 14 : 18;
+    final double lift = (_hover || _pressed) ? -8 : 0;
+    final double radius = isMobile ? 12 : 18;
 
     Widget cardWidget = GestureDetector(
       onTap: widget.onTap,
@@ -137,8 +128,8 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
         if (isMobile) _stopShimmer();
       },
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
         transform: Matrix4.identity()
           ..translate(0.0, lift)
           ..scale(targetScale),
@@ -155,20 +146,20 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
           boxShadow: [
             BoxShadow(
               color: (_hover || _pressed)
-                  ? widget.color.withOpacity(0.4)
-                  : Colors.black.withOpacity(0.08),
-              blurRadius: (_hover || _pressed) ? 24 : 10,
-              offset: Offset(0, (_hover || _pressed) ? 12 : 4),
+                  ? widget.color.withOpacity(0.32)
+                  : Colors.black12,
+              blurRadius: (_hover || _pressed) ? 20 : 8,
+              offset: const Offset(0, 8),
             ),
           ],
           border: Border.all(
             color: (_hover || _pressed)
                 ? widget.color.withOpacity(0.9)
-                : widget.color.withOpacity(0.3),
-            width: (_hover || _pressed) ? 1.5 : 1.0,
+                : Colors.white,
+            width: (_hover || _pressed) ? 1.3 : 0.8,
           ),
         ),
-        padding: EdgeInsets.all(isMobile ? 14 : 18),
+        padding: EdgeInsets.all(isMobile ? 12 : 16),
         child: Stack(
           children: [
             // Shimmer overlay
@@ -213,25 +204,16 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
                       color: widget.color.withOpacity(0.18),
-                      boxShadow: (_hover || _pressed)
-                          ? [
-                              BoxShadow(
-                                color: widget.color.withOpacity(0.3),
-                                blurRadius: 12,
-                                offset: const Offset(0, 4),
-                              ),
-                            ]
-                          : null,
                     ),
-                    padding: EdgeInsets.all(isMobile ? 10 : 14),
+                    padding: EdgeInsets.all(isMobile ? 8 : 12),
                     child: Icon(
                       widget.icon,
                       color: Colors.white,
-                      size: isMobile ? 22 : 28,
+                      size: isMobile ? 20 : 26,
                     ),
                   ),
                 ),
-                const SizedBox(width: 16),
+                const SizedBox(width: 14),
 
                 Expanded(
                   child: Column(
@@ -242,9 +224,8 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
                         widget.title,
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
-                          fontSize: isMobile ? 15 : 17,
+                          fontSize: isMobile ? 14 : 16,
                           color: const Color(0xFF0F1724),
-                          letterSpacing: 0.3,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -253,24 +234,13 @@ class _MagicalDashboardCardState extends State<MagicalDashboardCard>
                       Text(
                         widget.subtitle,
                         style: TextStyle(
-                          fontSize: isMobile ? 12 : 13.5,
+                          fontSize: isMobile ? 11.5 : 13,
                           color: Colors.grey[700],
-                          height: 1.3,
                         ),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
-                  ),
-                ),
-
-                AnimatedOpacity(
-                  duration: const Duration(milliseconds: 200),
-                  opacity: (_hover || _pressed) ? 1.0 : 0.0,
-                  child: Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 16,
-                    color: widget.color,
                   ),
                 ),
               ],

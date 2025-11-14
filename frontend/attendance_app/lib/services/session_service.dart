@@ -98,8 +98,8 @@ class SessionService {
     }
   }
 
-  /// End session
-  Future<bool> endSession(String sessionId) async {
+  /// End session and get statistics
+  Future<Map<String, dynamic>> endSession(String sessionId) async {
     try {
       final token = await _getToken();
       
@@ -110,10 +110,30 @@ class SessionService {
         ),
       );
       
-      return response.statusCode == 200;
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'message': response.data['message'] ?? 'Session ended successfully',
+          'statistics': response.data['statistics'] ?? {},
+          'session': response.data['session'],
+        };
+      }
+      
+      return {
+        'success': false,
+        'message': 'Failed to end session'
+      };
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'message': e.response?.data['error'] ?? 'Error ending session',
+      };
     } catch (e) {
       print('Error ending session: $e');
-      return false;
+      return {
+        'success': false,
+        'message': 'Error: $e'
+      };
     }
   }
 
@@ -133,6 +153,73 @@ class SessionService {
         return {
           'success': true,
           'message': response.data['message'],
+        };
+      }
+      
+      return {'success': false, 'message': 'Failed to mark attendance'};
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'message': e.response?.data['error'] ?? 'Failed to mark attendance',
+      };
+    }
+  }
+
+  /// Get session attendance details with student list
+  Future<Map<String, dynamic>?> getSessionAttendance(String sessionId) async {
+    try {
+      final token = await _getToken();
+      
+      final response = await _dio.get(
+        '/sessions/$sessionId/attendance/',
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+        ),
+      );
+      
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'session': response.data['session'],
+          'students': List<Map<String, dynamic>>.from(
+            response.data['students'] ?? []
+          ),
+          'statistics': response.data['statistics'] ?? {},
+        };
+      }
+      
+      return {'success': false};
+    } catch (e) {
+      print('Error fetching session attendance: $e');
+      return {'success': false, 'error': e.toString()};
+    }
+  }
+
+  /// Teacher manually marks attendance for a student
+  Future<Map<String, dynamic>> manualMarkAttendance({
+    required String sessionId,
+    required int studentId,
+    required String status, // "present" or "absent"
+  }) async {
+    try {
+      final token = await _getToken();
+      
+      final response = await _dio.post(
+        '/sessions/$sessionId/mark-student/',
+        data: {
+          'student_id': studentId,
+          'status': status,
+        },
+        options: Options(
+          headers: {'Authorization': 'Bearer $token'},
+        ),
+      );
+      
+      if (response.statusCode == 200) {
+        return {
+          'success': true,
+          'message': response.data['message'],
+          'record': response.data['record'],
         };
       }
       

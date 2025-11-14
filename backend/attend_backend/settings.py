@@ -31,6 +31,11 @@ DEBUG = os.getenv("DJANGO_DEBUG",False) == "True"
 ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.1.7', '*']
 
 AUTH_USER_MODEL = 'attendance.User'
+
+#ADD THESE LINES (Optional - for documentation)
+ACCOUNT_AUTHENTICATION_METHOD = 'email'  # Use email for login
+ACCOUNT_EMAIL_REQUIRED = True
+
 # Application definition
 
 INSTALLED_APPS = [
@@ -127,7 +132,7 @@ SIMPLE_JWT = {
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+TIME_ZONE = 'Asia/Kolkata'
 
 USE_I18N = True
 

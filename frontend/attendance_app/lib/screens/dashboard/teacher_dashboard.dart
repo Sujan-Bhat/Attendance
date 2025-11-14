@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import '../../services/auth_service.dart';
-import '../../services/class_service.dart';  
-import '../../widgets/magical_dashboard_card.dart';
+import '../../services/class_service.dart';
+import '../../widgets/enhanced_dashboard_card.dart';
 import '../teacher/my_classes_screen.dart';
 import '../teacher/session_create_screen.dart';
+import '../teacher/teacher_attendance_history_screen.dart';
+import '../teacher/teacher_profile_screen.dart';
 
 class TeacherDashboardPage extends StatefulWidget {
   const TeacherDashboardPage({super.key});
@@ -12,22 +14,24 @@ class TeacherDashboardPage extends StatefulWidget {
   State<TeacherDashboardPage> createState() => _TeacherDashboardPageState();
 }
 
-class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
+class _TeacherDashboardPageState extends State<TeacherDashboardPage>
+    with RouteAware {
   final AuthService _authService = AuthService();
   final ClassService _classService = ClassService();
-  
+
   bool isSidebarExpanded = false;
   String teacherName = "Loading...";
   String username = "";
   bool isLoading = true;
+  int totalClasses = 0;
+  int activeSessions = 0;
 
+  // Cache management
+  Map<String, dynamic>? _cachedUserData;
+  DateTime? _lastFetch;
+
+  // REMOVED: 'Class Insights' and 'Reports' cards
   final List<Map<String, dynamic>> dashboardCards = [
-    {
-      'title': 'Class Insights',
-      'subtitle': 'Track attendance patterns',
-      'icon': Icons.bar_chart_rounded,
-      'color': Colors.cyan,
-    },
     {
       'title': 'My Classes',
       'subtitle': 'Manage and monitor classes',
@@ -41,33 +45,15 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
       'color': Colors.orange,
     },
     {
-      'title': 'Announcements',
-      'subtitle': 'Share updates with students',
-      'icon': Icons.chat_rounded,
-      'color': Colors.purple,
-    },
-    {
-      'title': 'Reports Export',
-      'subtitle': 'Generate class reports',
-      'icon': Icons.file_download_rounded,
-      'color': Colors.indigo,
-    },
-    {
-      'title': 'Attendance',
-      'subtitle': 'Mark and review attendance',
+      'title': 'Attendance History',
+      'subtitle': 'View and edit attendance',
       'icon': Icons.check_circle_rounded,
       'color': Colors.teal,
     },
     {
-      'title': 'Resources',
-      'subtitle': 'Upload materials',
-      'icon': Icons.folder_rounded,
-      'color': Colors.deepOrange,
-    },
-    {
-      'title': 'Settings',
-      'subtitle': 'App preferences',
-      'icon': Icons.settings_rounded,
+      'title': 'Profile',
+      'subtitle': 'View your profile',
+      'icon': Icons.person_rounded,
       'color': Colors.blueGrey,
     },
   ];
@@ -78,365 +64,616 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
     _loadUserData();
   }
 
-  Future<void> _loadUserData() async {
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (mounted && !isLoading) {
+      _loadUserData();
+    }
+  }
+
+  Future<void> _loadUserData({bool forceRefresh = false}) async {
+    // Use cache if available and recent (less than 5 minutes old)
+    if (!forceRefresh &&
+        _cachedUserData != null &&
+        _lastFetch != null &&
+        DateTime.now().difference(_lastFetch!) < const Duration(minutes: 5)) {
+      setState(() {
+        teacherName = _cachedUserData!['first_name'] ?? 'Teacher';
+        username = _cachedUserData!['username'] ?? '';
+        isLoading = false;
+      });
+      return;
+    }
+
+    if (!mounted) return;
+
+    setState(() => isLoading = true);
+
     try {
-      final user = await _authService.getCurrentUser();
-      if (user != null && mounted) {
-        setState(() {
-          teacherName = user['name'] ?? user['username'] ?? 'Teacher';
-          username = user['username'] ?? '';
-          isLoading = false;
-        });
-      }
+      final userData = await _authService.getCurrentUser();
+      final classes = await _classService.getMyClasses();
+
+      if (!mounted) return;
+
+      setState(() {
+        _cachedUserData = userData;
+        _lastFetch = DateTime.now();
+        
+        teacherName = userData?['first_name'] ?? 'Teacher';
+        username = userData?['username'] ?? '';
+        totalClasses = classes.length;
+        activeSessions = 0; // TODO: Fetch from backend
+        isLoading = false;
+      });
     } catch (e) {
-      if (mounted) {
-        setState(() {
-          teacherName = 'Teacher';
-          isLoading = false;
-        });
-      }
+      if (!mounted) return;
+      setState(() {
+        teacherName = 'Error loading';
+        username = '';
+        isLoading = false;
+      });
+      print('Error loading user data: $e');
     }
   }
 
   void _handleCardTap(String title) async {
     switch (title) {
+      case 'My Classes':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const MyClassesScreen(),
+          ),
+        ).then((_) {
+          // Refresh data when returning from My Classes
+          _loadUserData(forceRefresh: true);
+        });
+        break;
+
       case 'Create Session':
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(child: CircularProgressIndicator()),
-        );
+        try {
+          // Show inline loading state
+          setState(() => isLoading = true);
+          
+          final classes = await _classService.getMyClasses();
+          
+          setState(() => isLoading = false);
 
-        final classes = await _classService.getMyClasses();
-        
-        if (mounted) Navigator.pop(context);
+          if (classes.isEmpty) {
+            _showNoClassesSnackBar();
+            return;
+          }
 
-        if (classes.isEmpty) {
+          final subjects = classes.map((c) => {
+            'id': c['id'].toString(),
+            'code': c['class_code'] as String,
+            'name': c['class_name'] as String,
+            'semester': c['semester'] as String,
+          }).toList();
+
           if (mounted) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => SessionPage(subjects: subjects),
+              ),
+            ).then((_) {
+              // Refresh data when returning from SessionPage
+              _loadUserData(forceRefresh: true);
+            });
+          }
+        } catch (e) {
+          if (mounted) {
+            setState(() => isLoading = false);
+            
             ScaffoldMessenger.of(context).showSnackBar(
               SnackBar(
-                content: Row(
-                  children: [
-                    const Icon(Icons.warning_rounded, color: Colors.white),
-                    const SizedBox(width: 12),
-                    const Expanded(
-                      child: Text('No classes found. Please create a class first.'),
-                    ),
-                  ],
-                ),
-                backgroundColor: Colors.orange.shade600,
-                behavior: SnackBarBehavior.floating,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                margin: const EdgeInsets.all(16),
-                action: SnackBarAction(
-                  label: 'Create Class',
-                  textColor: Colors.white,
-                  onPressed: () => Navigator.pushNamed(context, '/teacher/my-classes'),
-                ),
+                content: Text('Error loading classes: $e'),
+                backgroundColor: Colors.red,
               ),
             );
           }
-          return;
-        }
-
-        final subjects = classes.map((classData) {
-          return {
-            'id': classData['id'].toString(),
-            'code': classData['class_code'] as String,
-            'name': classData['class_name'] as String,
-            'semester': classData['semester'] as String,
-          };
-        }).toList();
-
-        if (mounted) {
-          Navigator.push(
-            context,
-            MaterialPageRoute(builder: (context) => SessionPage(subjects: subjects)),
-          );
         }
         break;
 
-      case 'My Classes':
-        Navigator.pushNamed(context, '/teacher/my-classes');
-        break;
-
-      default:
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$title - Coming soon!')),
+      case 'Attendance History':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const TeacherAttendanceHistoryScreen(),
+          ),
         );
+        break;
+
+      case 'Profile':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const TeacherProfileScreen(),
+          ),
+        ).then((_) {
+          _loadUserData(forceRefresh: true);
+        });
+        break;
+
+      //  REMOVED: Class Insights and Reports cases
+      
+      default:
+        _showComingSoonSnackBar(title);
     }
   }
 
+  void _showNoClassesSnackBar() {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('No classes found. Please create a class first.'),
+        backgroundColor: Colors.orange,
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
+  void _showComingSoonSnackBar(String title) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('$title - Coming Soon!'),
+        backgroundColor: Colors.blue,
+        duration: const Duration(seconds: 2),
+      ),
+    );
+  }
+
   Future<void> _logout() async {
-    await _authService.logout();
-    if (mounted) {
-      Navigator.pushReplacementNamed(context, '/login');
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      // Clear cache before logout
+      setState(() {
+        _cachedUserData = null;
+        _lastFetch = null;
+      });
+
+      await _authService.logout();
+      if (mounted) {
+        Navigator.pushReplacementNamed(context, '/login');
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    //  RESPONSIVE BREAKPOINTS
     final screenW = MediaQuery.of(context).size.width;
-    final screenH = MediaQuery.of(context).size.height;
-    
     final isMobile = screenW < 600;
     final isTablet = screenW >= 600 && screenW < 1024;
     final isDesktop = screenW >= 1024;
-    
-    // ADAPTIVE GRID COLUMNS
-    final crossAxisCount = isMobile ? 1 : (isTablet ? 2 : (screenW < 1400 ? 3 : 4));
-    
-    //  ADAPTIVE SPACING
-    final cardPadding = isMobile ? 12.0 : (isTablet ? 16.0 : 20.0);
-    final gridSpacing = isMobile ? 12.0 : (isTablet ? 16.0 : 18.0);
-    
-    // ADAPTIVE SIDEBAR
-    final sidebarWidth = isMobile ? 0.0 : (isSidebarExpanded ? 200.0 : 70.0);
-    
-    // ADAPTIVE ASPECT RATIO
-    final cardAspectRatio = isMobile ? 1.4 : (isTablet ? 1.15 : 1.25);
+
+    int crossAxisCount = isMobile ? 1 : (isTablet ? 2 : 3);
 
     return Scaffold(
-      // MOBILE: Drawer instead of sidebar
-      drawer: isMobile
-          ? Drawer(
-              child: Container(
-                color: const Color(0xFF1E1E2C),
-                child: ListView(
-                  padding: EdgeInsets.zero,
-                  children: [
-                    DrawerHeader(
-                      decoration: const BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [Color(0xFF007C91), Color(0xFF0097A7)],
-                        ),
-                      ),
+      backgroundColor: const Color(0xFFF4F8FB),
+      appBar: isMobile || isTablet ? _buildTopBar(isMobile) : null,
+      drawer: isMobile || isTablet ? _buildMobileDrawer() : null,
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Row(
+              children: [
+                if (isDesktop) _buildDesktopSidebar(),
+                Expanded(
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
+                    child: Padding(
+                      padding: EdgeInsets.all(isMobile ? 16 : 24),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.end,
                         children: [
-                          const Icon(Icons.school_rounded, color: Colors.white, size: 40),
-                          const SizedBox(height: 12),
-                          Text(
-                            teacherName,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                          if (isDesktop) _buildTopBar(false),
+                          if (isDesktop) const SizedBox(height: 24),
+                          _buildStatsSection(isMobile),
+                          const SizedBox(height: 24),
+                          _buildSectionHeader(isMobile),
+                          const SizedBox(height: 16),
+                          Center(
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 1100),
+                              child: _buildDashboardGrid(crossAxisCount, isMobile),
                             ),
-                          ),
-                          Text(
-                            username,
-                            style: const TextStyle(color: Colors.white70, fontSize: 14),
                           ),
                         ],
                       ),
                     ),
-                    _buildSidebarItem(Icons.dashboard, 'Dashboard', isMobile: true),
-                    _buildSidebarItem(Icons.people, 'My Classes', isMobile: true),
-                    _buildSidebarItem(Icons.analytics, 'Analysis', isMobile: true),
-                    _buildSidebarItem(Icons.announcement, 'Announcements', isMobile: true),
-                    _buildSidebarItem(Icons.settings, 'Settings', isMobile: true),
-                    const Divider(color: Colors.white24),
-                    ListTile(
-                      leading: const Icon(Icons.logout_rounded, color: Colors.white70),
-                      title: const Text('Logout', style: TextStyle(color: Colors.white)),
-                      onTap: _logout,
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            )
-          : null,
-      body: SafeArea(
-        child: Column(
-          children: [
-            
+              ],
+            ),
+          ),
+          
+          // Inline loading indicator
+          if (isLoading)
             Container(
-              width: double.infinity,
-              padding: EdgeInsets.symmetric(
-                horizontal: isMobile ? 12 : 20,
-                vertical: isMobile ? 10 : 14,
-              ),
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF007C91), Color(0xFF0097A7)],
-                  begin: Alignment.topLeft,
-                  end: Alignment.bottomRight,
-                ),
-                boxShadow: [
-                  BoxShadow(color: Colors.black26, blurRadius: 10, offset: Offset(0, 4)),
-                ],
-              ),
-              child: Row(
-                children: [
-                  // MOBILE: Show menu icon for drawer
-                  if (isMobile)
-                    Builder(
-                      builder: (context) => IconButton(
-                        icon: const Icon(Icons.menu_rounded, color: Colors.white),
-                        onPressed: () => Scaffold.of(context).openDrawer(),
-                      ),
-                    )
-                  else
-                    Icon(Icons.school_rounded, color: Colors.white, size: isMobile ? 24 : 28),
-                  
-                  SizedBox(width: isMobile ? 8 : 12),
-                  
-                  Expanded(
+              color: Colors.black26,
+              child: const Center(
+                child: Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(24.0),
                     child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          'Teacher Dashboard',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: isMobile ? 18 : 22,
-                            fontWeight: FontWeight.bold,
-                            letterSpacing: 0.6,
-                          ),
-                        ),
-                        if (!isLoading && !isMobile)
-                          Text(
-                            'Welcome, $teacherName',
-                            style: const TextStyle(color: Colors.white70, fontSize: 14),
-                          ),
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Loading...'),
                       ],
                     ),
                   ),
-                  
-                  // DESKTOP: Show logout button
-                  if (!isMobile)
-                    IconButton(
-                      icon: const Icon(Icons.logout_rounded, color: Colors.white),
-                      onPressed: _logout,
-                      tooltip: 'Logout',
-                    ),
-                ],
+                ),
               ),
             ),
+        ],
+      ),
+    );
+  }
 
-            // BODY WITH CONDITIONAL SIDEBAR
-            Expanded(
-              child: Row(
-                children: [
-                  // ✅ SIDEBAR (Desktop/Tablet only)
-                  if (!isMobile)
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 300),
-                      width: sidebarWidth,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF1E1E2C),
-                        boxShadow: [
-                          BoxShadow(color: Colors.black12, blurRadius: 8, offset: Offset(2, 0)),
-                        ],
-                      ),
-                      child: Column(
-                        children: [
-                          const SizedBox(height: 14),
-                          IconButton(
-                            icon: AnimatedSwitcher(
-                              duration: const Duration(milliseconds: 300),
-                              child: isSidebarExpanded
-                                  ? const Icon(Icons.arrow_back_ios_new_rounded,
-                                      color: Colors.white, key: ValueKey(1))
-                                  : const Icon(Icons.menu_rounded,
-                                      color: Colors.white, key: ValueKey(2)),
-                            ),
-                            onPressed: () =>
-                                setState(() => isSidebarExpanded = !isSidebarExpanded),
-                          ),
-                          const SizedBox(height: 24),
-                          Expanded(
-                            child: ListView(
-                              children: [
-                                _buildSidebarItem(Icons.dashboard, 'Dashboard'),
-                                _buildSidebarItem(Icons.people, 'My Classes'),
-                                _buildSidebarItem(Icons.analytics, 'Analysis'),
-                                _buildSidebarItem(Icons.announcement, 'Announcements'),
-                                _buildSidebarItem(Icons.settings, 'Settings'),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-
-                  // MAIN CONTENT AREA
-                  Expanded(
-                    child: SingleChildScrollView(
-                      physics: const BouncingScrollPhysics(),
-                      child: Padding(
-                        padding: EdgeInsets.all(cardPadding),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            // RESPONSIVE HEADER
-                            Text(
-                              'Overview',
-                              style: TextStyle(
-                                fontSize: isMobile ? 18 : 20,
-                                fontWeight: FontWeight.bold,
-                                color: const Color(0xFF1F2937),
-                              ),
-                            ),
-                            SizedBox(height: isMobile ? 12 : 18),
-
-                            //  RESPONSIVE GRID
-                            GridView.builder(
-                              itemCount: dashboardCards.length,
-                              physics: const NeverScrollableScrollPhysics(),
-                              shrinkWrap: true,
-                              gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                                crossAxisCount: crossAxisCount,
-                                mainAxisSpacing: gridSpacing,
-                                crossAxisSpacing: gridSpacing,
-                                childAspectRatio: cardAspectRatio,
-                              ),
-                              itemBuilder: (context, idx) {
-                                final card = dashboardCards[idx];
-                                return MagicalDashboardCard(
-                                  title: card['title'] as String,
-                                  subtitle: card['subtitle'] as String,
-                                  icon: card['icon'] as IconData,
-                                  color: card['color'] as Color,
-                                  onTap: () => _handleCardTap(card['title'] as String),
-                                );
-                              },
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+  PreferredSizeWidget _buildTopBar(bool isMobile) {
+    return AppBar(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      leading: isMobile
+          ? null
+          : IconButton(
+              icon: const Icon(Icons.menu, color: Color(0xFF1F2937)),
+              onPressed: () => setState(() => isSidebarExpanded = !isSidebarExpanded),
+            ),
+      title: Row(
+        children: [
+          Container(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+              ),
+              shape: BoxShape.circle,
+            ),
+            padding: const EdgeInsets.all(8),
+            child: const Icon(Icons.school_rounded, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Welcome back, $teacherName',
+                  style: TextStyle(
+                    fontSize: isMobile ? 16 : 18,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF1F2937),
                   ),
-                ],
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (!isMobile)
+                  Text(
+                    '@$username',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey[600],
+                      fontWeight: FontWeight.normal,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        IconButton(
+          icon: const Icon(Icons.refresh, color: Color(0xFF1F2937)),
+          onPressed: () => _loadUserData(forceRefresh: true),
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout, color: Color(0xFF1F2937)),
+          onPressed: _logout,
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatsSection(bool isMobile) {
+    return Row(
+      children: [
+        Expanded(
+          child: _buildStatCard(
+            'Total Classes',
+            totalClasses.toString(),
+            Icons.class_rounded,
+            const Color(0xFF0097A7),
+            isMobile,
+          ),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: _buildStatCard(
+            'Active Sessions',
+            activeSessions.toString(),
+            Icons.timer_rounded,
+            const Color(0xFFFF6B6B),
+            isMobile,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatCard(
+    String label,
+    String value,
+    IconData icon,
+    Color color,
+    bool isMobile,
+  ) {
+    return Container(
+      padding: EdgeInsets.all(isMobile ? 16 : 20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [color.withOpacity(0.1), Colors.white],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: color.withOpacity(0.3)),
+        boxShadow: [
+          BoxShadow(
+            color: color.withOpacity(0.1),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(icon, color: color, size: isMobile ? 24 : 28),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  value,
+                  style: TextStyle(
+                    fontSize: isMobile ? 24 : 28,
+                    fontWeight: FontWeight.bold,
+                    color: const Color(0xFF1F2937),
+                  ),
+                ),
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: isMobile ? 12 : 14,
+                    color: Colors.grey[600],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSectionHeader(bool isMobile) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Overview',
+          style: TextStyle(
+            fontSize: 20,
+            fontWeight: FontWeight.bold,
+            color: const Color(0xFF1F2937),
+          ),
+        ),
+        const SizedBox(height: 18),
+        Row(
+          children: [
+            Container(
+              width: 4,
+              height: 24,
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+                ),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              'Quick Actions',
+              style: TextStyle(
+                fontSize: isMobile ? 18 : 22,
+                fontWeight: FontWeight.bold,
+                color: const Color(0xFF1F2937),
               ),
             ),
           ],
         ),
+      ],
+    );
+  }
+
+  Widget _buildDashboardGrid(int crossAxisCount, bool isMobile) {
+    return GridView.builder(
+      itemCount: dashboardCards.length,
+      physics: const NeverScrollableScrollPhysics(),
+      shrinkWrap: true,
+      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: crossAxisCount,
+        mainAxisSpacing: 18,
+        crossAxisSpacing: 18,
+        childAspectRatio: isMobile ? 0.96 : 1.22,
+      ),
+      itemBuilder: (context, idx) {
+        final card = dashboardCards[idx];
+        return Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: EnhancedDashboardCard(
+              title: card['title'] as String,
+              subtitle: card['subtitle'] as String,
+              icon: card['icon'] as IconData,
+              color: card['color'] as Color,
+              onTap: () => _handleCardTap(card['title'] as String),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildDesktopSidebar() {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      width: isSidebarExpanded ? 220 : 70,
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          colors: [Color(0xFF1E1E2C), Color(0xFF2D2D44)],
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26,
+            blurRadius: 10,
+            offset: Offset(2, 0),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 20),
+          Expanded(
+            child: ListView.builder(
+              itemCount: dashboardCards.length,
+              itemBuilder: (context, index) {
+                final card = dashboardCards[index];
+                return _buildSidebarItem(
+                  card['icon'] as IconData,
+                  card['title'] as String,
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
+        ],
       ),
     );
   }
 
   Widget _buildSidebarItem(IconData icon, String title, {bool isMobile = false}) {
     return ListTile(
-      leading: Icon(icon, color: Colors.white70),
-      title: (isSidebarExpanded || isMobile)
-          ? Text(title, style: const TextStyle(color: Colors.white))
+      leading: Icon(icon, color: Colors.white70, size: isMobile ? 24 : 20),
+      title: isSidebarExpanded || isMobile
+          ? Text(
+              title,
+              style: const TextStyle(color: Colors.white, fontSize: 14),
+            )
           : null,
-      onTap: () {
-        // Close drawer on mobile
-        if (isMobile) {
-          Navigator.pop(context);
-        }
-        
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('$title clicked'),
-            duration: const Duration(milliseconds: 800),
+      onTap: () => _handleCardTap(title),
+    );
+  }
+
+  Widget _buildMobileDrawer() {
+    return Drawer(
+      child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF1E1E2C), Color(0xFF2D2D44)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
-        );
+        ),
+        child: ListView(
+          children: [
+            DrawerHeader(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF007C91), Color(0xFF0097A7)],
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.end,
+                children: [
+                  const CircleAvatar(
+                    radius: 30,
+                    backgroundColor: Colors.white,
+                    child: Icon(Icons.person, size: 35, color: Color(0xFF007C91)),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    teacherName,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  Text(
+                    '@$username',
+                    style: const TextStyle(color: Colors.white70, fontSize: 14),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            ...dashboardCards.map((card) => _buildDrawerItem(
+              card['icon'] as IconData,
+              card['title'] as String,
+            )),
+            const Divider(color: Colors.white24),
+            _buildDrawerItem(Icons.logout, 'Logout'),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDrawerItem(IconData icon, String title, {VoidCallback? onTap}) {
+    return ListTile(
+      leading: Icon(icon, color: Colors.white70),
+      title: Text(title, style: const TextStyle(color: Colors.white)),
+      onTap: () {
+        Navigator.pop(context); // Close drawer
+        if (title == 'Logout') {
+          _logout();
+        } else {
+          _handleCardTap(title);
+        }
       },
     );
   }

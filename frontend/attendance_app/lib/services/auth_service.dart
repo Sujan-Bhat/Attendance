@@ -27,11 +27,11 @@ class AuthService {
     ));
   }
 
-  Future<bool> login(String username, String password) async {
+  Future<bool> login(String email, String password) async {
     try {
       // Step 1: Make POST request to /auth/token/ endpoint(Django backend)
       final response = await _dio.post('/auth/token/', data: {
-        'username': username,
+        'email': email,
         'password': password,
       });
 
@@ -52,7 +52,6 @@ class AuthService {
       return false;
     } on DioException catch (e) {
       print('Login error [${e.response?.statusCode}]: ${e.response?.data ?? e.message}');
-      // Let the UI handle the DioException
       rethrow;
     } catch (e) {
       print('Unexpected login error: $e');

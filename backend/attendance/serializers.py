@@ -4,6 +4,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
 from .models import StudentProfile, Class, Enrollment, AttendanceSession, AttendanceRecord
 import json
+from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
 User = get_user_model()
 
@@ -72,24 +73,25 @@ class RegistrationSerializer(serializers.ModelSerializer):
 
 class LoginSerializer(serializers.Serializer):
     """ Serializer for user login """
-    username = serializers.CharField(required=True)
+    email = serializers.EmailField(required=True)  
     password = serializers.CharField(required=True, write_only=True)
 
     def validate(self, data):
-        username = data.get('username')
+        email = data.get('email')  
         password = data.get('password')
 
-        if username and password:
-            user = authenticate(username=username, password=password)
+        if email and password:
+            
+            user = authenticate(username=email, password=password)  # Django uses 'username' param even for email
             if user:
                 if user.is_active:
                     data['user'] = user
                 else:
                     raise serializers.ValidationError("User account is disabled.")
             else:
-                raise serializers.ValidationError("Invalid username or password.")
+                raise serializers.ValidationError("Invalid email or password.")  # ✅ CHANGED message
         else:
-            raise serializers.ValidationError("Username and password are required.")
+            raise serializers.ValidationError("Email and password are required.")  # ✅ CHANGED message
 
         return data
 
@@ -279,8 +281,8 @@ class SessionSerializer(serializers.ModelSerializer):
         model = AttendanceSession
         fields = [
             'id', 'session_id', 'class_code', 'class_name', 'semester',
-            'teacher_name', 'start_time', 'end_time', 'duration_minutes',
-            'status', 'is_active', 'qr_data', 'created_at'
+            'teacher_name', 'start_time', 'end_time',  # ✅ REMOVE start_time_ist, end_time_ist
+            'duration_minutes', 'status', 'is_active', 'qr_data', 'created_at'
         ]
     
     def get_qr_data(self, obj):
@@ -289,7 +291,8 @@ class SessionSerializer(serializers.ModelSerializer):
             return json.loads(obj.qr_code_data)
         except:
             return obj.qr_code_data
-
+    
+    # ✅ REMOVE get_start_time_ist() and get_end_time_ist() methods completely
 
 class AttendanceRecordSerializer(serializers.ModelSerializer):
     """Serializer for attendance records"""
@@ -306,3 +309,56 @@ class AttendanceRecordSerializer(serializers.ModelSerializer):
             return obj.student.student_profile.roll_no
         except:
             return 'N/A'
+        
+
+class TeacherAttendanceHistorySerializer(serializers.ModelSerializer):
+    """Serializer for teacher viewing attendance records"""
+    student_name = serializers.CharField(source='student.username', read_only=True)
+    student_email = serializers.CharField(source='student.email', read_only=True)
+    roll_no = serializers.SerializerMethodField()
+    class_code = serializers.CharField(source='session.class_obj.class_code', read_only=True)
+    class_name = serializers.CharField(source='session.class_obj.class_name', read_only=True)
+    semester = serializers.CharField(source='session.class_obj.semester', read_only=True)
+    session_date = serializers.DateTimeField(source='session.start_time', read_only=True)
+    
+    class Meta:
+        model = AttendanceRecord
+        fields = [
+            'id', 'student_name', 'student_email', 'roll_no',
+            'class_code', 'class_name', 'semester',
+            'session_date', 'status', 'marked_at'
+        ]
+    
+    def get_roll_no(self, obj):
+        try:
+            return obj.student.student_profile.roll_no
+        except:
+            return 'N/A'
+
+
+class UpdateAttendanceStatusSerializer(serializers.Serializer):
+    """Serializer for updating attendance status"""
+    status = serializers.ChoiceField(choices=['present', 'absent'])
+
+# Add this near MyTokenObtainPairSerializer if you want to customize JWT login
+
+class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
+    
+    username_field = 'email'
+    
+    @classmethod
+    def get_token(cls, user):
+        """Generate JWT token with custom claims"""
+        token = super().get_token(user)
+        # Add custom claims
+        token['role'] = user.role
+        token['username'] = user.username
+        token['email'] = user.email  
+        return token
+
+    def validate(self, attrs):
+        """Authenticate user and return tokens + user data"""
+        data = super().validate(attrs)
+        # Add user data to response
+        data['user'] = UserSerializer(self.user).data
+        return data

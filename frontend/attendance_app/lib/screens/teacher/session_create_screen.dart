@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import '../../services/session_service.dart';
 import 'dart:convert';
+import 'session_active_screen.dart';
 
 class SessionPage extends StatefulWidget {
   final List<Map<String, String>> subjects;  
@@ -74,12 +75,9 @@ class _SessionPageState extends State<SessionPage>
       return;
     }
 
-    setState(() {
-      isCreatingSession = true;
-    });
+    setState(() => isCreatingSession = true);
 
     try {
-      // Call backend API to create session
       final result = await _sessionService.createSession(
         classId: int.parse(selectedSubjectId!),
         durationMinutes: durationMinutes,
@@ -90,42 +88,30 @@ class _SessionPageState extends State<SessionPage>
       if (result['success']) {
         sessionData = result['session'];
         final qrData = sessionData!['qr_data'];
-        
-        // Generate QR code string from backend data
         qrCodeData = jsonEncode(qrData);
 
-        setState(() {
-          isSessionActive = true;
-          remainingSeconds = durationMinutes * 60;
-          isCreatingSession = false;
-        });
+        setState(() => isCreatingSession = false);
 
-        // Start countdown timer
-        countdownTimer?.cancel();
-        countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-          if (remainingSeconds > 0) {
-            setState(() {
-              remainingSeconds--;
-            });
-          } else {
-            timer.cancel();
-            _endSession();
-          }
-        });
+        //  NAVIGATE TO FULL-SCREEN SESSION VIEW
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (context) => SessionActiveScreen(
+              sessionData: sessionData!,
+              qrCodeData: qrCodeData!,
+            ),
+          ),
+        );
 
         _showSuccessSnackBar(
           "Session started for $selectedSubjectCode - $selectedSubjectName",
         );
       } else {
-        setState(() {
-          isCreatingSession = false;
-        });
+        setState(() => isCreatingSession = false);
         _showErrorSnackBar(result['message'] ?? 'Failed to create session');
       }
     } catch (e) {
-      setState(() {
-        isCreatingSession = false;
-      });
+      setState(() => isCreatingSession = false);
       _showErrorSnackBar('Error creating session: $e');
     }
   }
@@ -375,29 +361,40 @@ class _SessionPageState extends State<SessionPage>
                                         contentPadding: EdgeInsets.symmetric(vertical: 18),
                                       ),
                                       dropdownColor: Colors.white,
+                                      isExpanded: true, 
                                       value: selectedSubjectId,
+                                      itemHeight: null, 
+                                      menuMaxHeight: 300, 
                                       items: widget.subjects.map((subject) {
                                         return DropdownMenuItem<String>(
                                           value: subject['id'],
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Text(
-                                                "${subject['code']} - ${subject['name']}",
-                                                style: TextStyle(
-                                                  fontSize: isMobile ? 14 : 16,
-                                                  fontWeight: FontWeight.w500,
+                                          child: Padding( //  WRAP IN PADDING
+                                            padding: const EdgeInsets.symmetric(vertical: 12), // ✅ ADD VERTICAL PADDING
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                Text(
+                                                  "${subject['code']} - ${subject['name']}",
+                                                  style: TextStyle(
+                                                    fontSize: isMobile ? 14 : 16,
+                                                    fontWeight: FontWeight.w500,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis, // ✅ ADD THIS
+                                                  maxLines: 1, // ✅ ADD THIS
                                                 ),
-                                              ),
-                                              Text(
-                                                subject['semester'] ?? '',
-                                                style: TextStyle(
-                                                  fontSize: isMobile ? 11 : 12,
-                                                  color: Colors.grey[600],
+                                                const SizedBox(height: 4), // ✅ ADD SPACING
+                                                Text(
+                                                  subject['semester'] ?? '',
+                                                  style: TextStyle(
+                                                    fontSize: isMobile ? 11 : 12,
+                                                    color: Colors.grey[600],
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis, // ✅ ADD THIS
+                                                  maxLines: 1, // ✅ ADD THIS
                                                 ),
-                                              ),
-                                            ],
+                                              ],
+                                            ),
                                           ),
                                         );
                                       }).toList(),
@@ -609,6 +606,158 @@ class _SessionPageState extends State<SessionPage>
                                           ),
                                         ),
                                       ],
+                                    ),
+
+                                  // Selected Class Preview
+                                  if (selectedSubjectId != null)
+                                    Container(
+                                      margin: EdgeInsets.only(bottom: isMobile ? 16 : 24),
+                                      padding: EdgeInsets.all(isMobile ? 14 : 18),
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [
+                                            const Color(0xFF007C91).withOpacity(0.1),
+                                            const Color(0xFF0097A7).withOpacity(0.05),
+                                          ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(
+                                          color: const Color(0xFF007C91).withOpacity(0.3),
+                                          width: 2,
+                                        ),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Container(
+                                                padding: const EdgeInsets.all(8),
+                                                decoration: BoxDecoration(
+                                                  color: const Color(0xFF007C91),
+                                                  borderRadius: BorderRadius.circular(8),
+                                                ),
+                                                child: const Icon(
+                                                  Icons.check_circle_rounded,
+                                                  color: Colors.white,
+                                                  size: 20,
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Text(
+                                                "Selected Class",
+                                                style: TextStyle(
+                                                  fontSize: isMobile ? 14 : 16,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: const Color(0xFF007C91),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 12),
+                                          Container(
+                                            padding: const EdgeInsets.all(12),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius: BorderRadius.circular(12),
+                                            ),
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons.class_rounded,
+                                                      size: 16,
+                                                      color: Colors.grey[600],
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      "Code:",
+                                                      style: TextStyle(
+                                                        fontSize: isMobile ? 12 : 13,
+                                                        color: Colors.grey[600],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Text(
+                                                        selectedSubjectCode ?? 'N/A',
+                                                        style: TextStyle(
+                                                          fontSize: isMobile ? 14 : 15,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.grey[800],
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 8),
+                                                Row(
+                                                  children: [
+                                                    Icon(
+                                                      Icons.book_rounded,
+                                                      size: 16,
+                                                      color: Colors.grey[600],
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      "Name:",
+                                                      style: TextStyle(
+                                                        fontSize: isMobile ? 12 : 13,
+                                                        color: Colors.grey[600],
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Text(
+                                                        selectedSubjectName ?? 'N/A',
+                                                        style: TextStyle(
+                                                          fontSize: isMobile ? 14 : 15,
+                                                          fontWeight: FontWeight.w600,
+                                                          color: Colors.grey[800],
+                                                        ),
+                                                        maxLines: 2,
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                                if (selectedSemester != null && selectedSemester!.isNotEmpty)
+                                                  Padding(
+                                                    padding: const EdgeInsets.only(top: 8),
+                                                    child: Row(
+                                                      children: [
+                                                        Icon(
+                                                          Icons.school_rounded,
+                                                          size: 16,
+                                                          color: Colors.grey[600],
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Text(
+                                                          "Semester:",
+                                                          style: TextStyle(
+                                                            fontSize: isMobile ? 12 : 13,
+                                                            color: Colors.grey[600],
+                                                          ),
+                                                        ),
+                                                        const SizedBox(width: 8),
+                                                        Text(
+                                                          selectedSemester!,
+                                                          style: TextStyle(
+                                                            fontSize: isMobile ? 14 : 15,
+                                                            fontWeight: FontWeight.w600,
+                                                            color: Colors.grey[800],
+                                                          ),
+                                                        ),
+                                                      ],
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                        ],
+                                      ),
                                     ),
 
                                   //  QR Placeholder (when not active)

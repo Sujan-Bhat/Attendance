@@ -1,3 +1,6 @@
+import json
+import uuid
+import re
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
@@ -5,8 +8,7 @@ from django.contrib.auth import get_user_model
 from django.db import transaction
 from django.utils import timezone
 from datetime import timedelta
-import json
-import uuid
+
 
 from .serializers import (
     RegistrationSerializer, 
@@ -19,6 +21,8 @@ from .serializers import (
     CreateSessionSerializer,  
     SessionSerializer,
     AttendanceRecordSerializer,
+    TeacherAttendanceHistorySerializer,
+    UpdateAttendanceStatusSerializer,
 )
 from .models import Class, Enrollment, StudentProfile, AttendanceSession, AttendanceRecord
 from rest_framework_simplejwt.views import TokenObtainPairView
@@ -593,7 +597,7 @@ def mark_attendance(request, session_id):
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def end_session(request, session_id):
-    """Teacher ends an active session"""
+    """Teacher ends an active session and marks absent students"""
     user = request.user
     
     try:
@@ -613,14 +617,66 @@ def end_session(request, session_id):
             status=status.HTTP_400_BAD_REQUEST
         )
     
-    session.status = 'completed'
-    session.end_time = timezone.now()
-    session.save()
+    # Mark all absent students before ending session
+    with transaction.atomic():
+        # Get all enrolled students in this class
+        enrolled_students = Enrollment.objects.filter(
+            class_obj=session.class_obj
+        ).select_related('student')
+        
+        # Get students who already marked attendance
+        already_marked = AttendanceRecord.objects.filter(
+            session=session
+        ).values_list('student_id', flat=True)
+        
+        # Find students who haven't marked attendance
+        absent_students = enrolled_students.exclude(
+            student_id__in=already_marked
+        )
+        
+        # Create attendance records for absent students
+        absent_records = []
+        for enrollment in absent_students:
+            absent_records.append(
+                AttendanceRecord(
+                    session=session,
+                    student=enrollment.student,
+                    status='absent'
+                )
+            )
+        
+        # Bulk create all absent records
+        auto_marked_count = 0
+        if absent_records:
+            AttendanceRecord.objects.bulk_create(absent_records)
+            auto_marked_count = len(absent_records)
+        
+        # Update session status
+        session.status = 'completed'
+        session.end_time = timezone.now()
+        session.save()
+    
+    # Get final statistics
+    total_students = enrolled_students.count()
+    present_count = AttendanceRecord.objects.filter(
+        session=session,
+        status='present'
+    ).count()
+    absent_count = total_students - present_count
+    attendance_rate = round((present_count / total_students * 100), 2) if total_students > 0 else 0
     
     return Response({
+        'success': True,
         'message': 'Session ended successfully',
-        'session': SessionSerializer(session).data
-    })
+        'session': SessionSerializer(session).data,
+        'statistics': {
+            'total_students': total_students,
+            'present': present_count,
+            'absent': absent_count,
+            'attendance_rate': attendance_rate,
+            'auto_marked_absent': auto_marked_count
+        }
+    }, status=status.HTTP_200_OK)
 
 
 # ============================================
@@ -701,3 +757,362 @@ def get_student_attendance_history(request):
         'total': len(attendance_data)
     })
 
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def check_student_by_email(request):
+    """
+    Check if a student exists by email and return their details
+    GET /api/v1/auth/check-student/?email=student@example.com
+    """
+    email = request.query_params.get('email')
+    
+    if not email:
+        return Response(
+            {'error': 'Email parameter is required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    # Validate email format
+    import re
+    email_pattern = r'^[\w\.-]+@[\w\.-]+\.\w+$'
+    if not re.match(email_pattern, email):
+        return Response(
+            {'error': 'Invalid email format'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        user = User.objects.get(email=email, role='student')
+        
+        # Try to get student profile
+        try:
+            profile = user.student_profile
+            roll_no = profile.roll_no
+        except StudentProfile.DoesNotExist:
+            roll_no = None
+        
+        return Response({
+            'exists': True,
+            'student': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'roll_no': roll_no,
+            }
+        }, status=status.HTTP_200_OK)
+        
+    except User.DoesNotExist:
+        return Response({
+            'exists': False,
+            'message': 'Student not found with this email'
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'error': f'Error checking student: {str(e)}'
+        }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+@api_view(['PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def update_student_in_class(request, class_id, student_id):
+    """Update student details in a class"""
+    user = request.user
+    
+    try:
+        class_obj = Class.objects.get(id=class_id, teacher=user)
+        enrollment = Enrollment.objects.get(class_obj=class_obj, student_id=student_id)
+        
+        # Update student profile
+        profile = enrollment.student.student_profile
+        roll_no = request.data.get('roll_no')
+        
+        if roll_no:
+            # Check if roll number already exists
+            if StudentProfile.objects.filter(roll_no=roll_no).exclude(student=enrollment.student).exists():
+                return Response(
+                    {'error': 'Roll number already exists'},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+            profile.roll_no = roll_no
+            profile.save()
+        
+        return Response({'message': 'Student updated successfully'})
+    
+    except Class.DoesNotExist:
+        return Response({'error': 'Class not found'}, status=status.HTTP_404_NOT_FOUND)
+    except Enrollment.DoesNotExist:
+        return Response({'error': 'Student not enrolled'}, status=status.HTTP_404_NOT_FOUND)
+
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_teacher_attendance_history(request):
+    """
+    Get attendance history for teacher's classes
+    Query params:
+    - class_id: Filter by specific class (optional)
+    - session_id: Filter by specific session (optional)
+    - date_from: Filter from date (YYYY-MM-DD) (optional)
+    - date_to: Filter to date (YYYY-MM-DD) (optional)
+    """
+    user = request.user
+    
+    if user.role != 'teacher':
+        return Response(
+            {'error': 'Only teachers can view attendance history'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Base query: all attendance records for teacher's classes
+    records = AttendanceRecord.objects.filter(
+        session__teacher=user
+    ).select_related(
+        'student__student_profile',
+        'session__class_obj'
+    ).order_by('-marked_at')
+    
+    # Apply filters
+    class_id = request.query_params.get('class_id')
+    if class_id:
+        records = records.filter(session__class_obj_id=class_id)
+    
+    session_id = request.query_params.get('session_id')
+    if session_id:
+        records = records.filter(session__session_id=session_id)
+    
+    date_from = request.query_params.get('date_from')
+    if date_from:
+        try:
+            from_date = timezone.datetime.strptime(date_from, '%Y-%m-%d').date()
+            records = records.filter(session__start_time__date__gte=from_date)
+        except ValueError:
+            pass
+    
+    date_to = request.query_params.get('date_to')
+    if date_to:
+        try:
+            to_date = timezone.datetime.strptime(date_to, '%Y-%m-%d').date()
+            records = records.filter(session__start_time__date__lte=to_date)
+        except ValueError:
+            pass
+    
+    serializer = TeacherAttendanceHistorySerializer(records, many=True)
+    
+    # Calculate statistics
+    total_records = records.count()
+    present_count = records.filter(status='present').count()
+    absent_count = records.filter(status='absent').count()
+    
+    return Response({
+        'attendance': serializer.data,
+        'statistics': {
+            'total': total_records,
+            'present': present_count,
+            'absent': absent_count,
+            'attendance_rate': round((present_count / total_records * 100), 2) if total_records > 0 else 0
+        }
+    })
+
+
+@api_view(['PUT'])
+@permission_classes([permissions.IsAuthenticated])
+def update_attendance_status(request, record_id):
+    """Update attendance status (teacher only)"""
+    user = request.user
+    
+    if user.role != 'teacher':
+        return Response(
+            {'error': 'Only teachers can update attendance'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    try:
+        # Verify record belongs to teacher's class
+        record = AttendanceRecord.objects.select_related('session').get(
+            id=record_id,
+            session__teacher=user
+        )
+    except AttendanceRecord.DoesNotExist:
+        return Response(
+            {'error': 'Attendance record not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    serializer = UpdateAttendanceStatusSerializer(data=request.data)
+    
+    if not serializer.is_valid():
+        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    new_status = serializer.validated_data['status']
+    old_status = record.status
+    
+    record.status = new_status
+    record.save()
+    
+    return Response({
+        'message': f'Attendance updated from {old_status} to {new_status}',
+        'record': TeacherAttendanceHistorySerializer(record).data
+    })
+
+
+@api_view(['POST'])
+@permission_classes([permissions.IsAuthenticated])
+def manual_mark_attendance(request, session_id):
+    """
+    Teacher manually marks attendance for a student
+    POST /api/v1/sessions/{session_id}/mark-student/
+    Body: {
+        "student_id": 1,
+        "status": "present" or "absent"
+    }
+    """
+    user = request.user
+    
+    if user.role != 'teacher':
+        return Response(
+            {'error': 'Only teachers can manually mark attendance'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    try:
+        session = AttendanceSession.objects.get(
+            session_id=session_id,
+            teacher=user
+        )
+    except AttendanceSession.DoesNotExist:
+        return Response(
+            {'error': 'Session not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    student_id = request.data.get('student_id')
+    new_status = request.data.get('status')
+    
+    if not student_id or not new_status:
+        return Response(
+            {'error': 'student_id and status are required'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    if new_status not in ['present', 'absent']:
+        return Response(
+            {'error': 'status must be "present" or "absent"'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    
+    try:
+        student = User.objects.get(id=student_id, role='student')
+    except User.DoesNotExist:
+        return Response(
+            {'error': 'Student not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Check if student is enrolled
+    if not Enrollment.objects.filter(class_obj=session.class_obj, student=student).exists():
+        return Response(
+            {'error': 'Student not enrolled in this class'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    # Create or update attendance record
+    record, created = AttendanceRecord.objects.update_or_create(
+        session=session,
+        student=student,
+        defaults={'status': new_status}
+    )
+    
+    action = 'marked' if created else 'updated'
+    
+    return Response({
+        'success': True,
+        'message': f'Attendance {action} as {new_status}',
+        'record': {
+            'id': record.id,
+            'student_id': student.id,
+            'student_name': student.username,
+            'status': record.status,
+            'marked_at': record.marked_at,
+        }
+    }, status=status.HTTP_200_OK)
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def get_session_attendance_details(request, session_id):
+    """
+    Get detailed attendance information for a specific session
+    Returns session info + list of all enrolled students with their attendance status
+    """
+    user = request.user
+    
+    if user.role != 'teacher':
+        return Response(
+            {'error': 'Only teachers can view session attendance details'},
+            status=status.HTTP_403_FORBIDDEN
+        )
+    
+    try:
+        session = AttendanceSession.objects.select_related('class_obj').get(
+            session_id=session_id,
+            teacher=user
+        )
+    except AttendanceSession.DoesNotExist:
+        return Response(
+            {'error': 'Session not found'},
+            status=status.HTTP_404_NOT_FOUND
+        )
+    
+    # Get all enrolled students
+    enrollments = Enrollment.objects.filter(
+        class_obj=session.class_obj
+    ).select_related('student__student_profile')
+    
+    # Get attendance records for this session
+    attendance_records = AttendanceRecord.objects.filter(
+        session=session
+    ).select_related('student')
+    
+    # Create a map of student_id -> attendance record
+    attendance_map = {record.student_id: record for record in attendance_records}
+    
+    # Build student list with attendance status
+    students_data = []
+    for enrollment in enrollments:
+        student = enrollment.student
+        record = attendance_map.get(student.id)
+        
+        try:
+            roll_no = student.student_profile.roll_no
+        except StudentProfile.DoesNotExist:
+            roll_no = 'N/A'
+        
+        students_data.append({
+            'id': student.id,
+            'username': student.username,
+            'email': student.email,
+            'roll_no': roll_no,
+            'status': record.status if record else 'absent',
+            'marked_at': record.marked_at.isoformat() if record and record.marked_at else None,
+            'record_id': record.id if record else None,
+            'has_record': record is not None
+        })
+    
+    # Calculate statistics
+    total_students = len(students_data)
+    present_count = sum(1 for s in students_data if s['status'] == 'present')
+    absent_count = total_students - present_count
+    attendance_rate = round((present_count / total_students * 100), 2) if total_students > 0 else 0
+    
+    return Response({
+        'session': SessionSerializer(session).data,
+        'students': students_data,
+        'statistics': {
+            'total': total_students,
+            'present': present_count,
+            'absent': absent_count,
+            'attendance_rate': attendance_rate
+        }
+    })

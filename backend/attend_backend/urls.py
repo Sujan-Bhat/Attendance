@@ -15,7 +15,7 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.urls import path, include
+from django.urls import path
 from attendance.views import (
     RegisterView, 
     MeView, 
@@ -26,7 +26,6 @@ from attendance.views import (
     get_class_students,
     add_student_to_class,
     remove_student_from_class,
-    # Session views
     create_session,
     get_active_sessions,
     get_session_details,
@@ -34,6 +33,12 @@ from attendance.views import (
     end_session,
     get_student_enrolled_classes,  
     get_student_attendance_history,
+    check_student_by_email,
+    update_student_in_class,
+    get_teacher_attendance_history,
+    get_session_attendance_details,
+    update_attendance_status,
+    manual_mark_attendance,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 
@@ -47,6 +52,7 @@ urlpatterns = [
     # User management
     path('api/v1/auth/register/', RegisterView.as_view(), name='register'),
     path('api/v1/auth/me/', MeView.as_view(), name='me'),
+    path('api/v1/auth/check-student/', check_student_by_email, name='check-student'),  
     
     # Class management (Teacher)
     path('api/v1/classes/', class_list_create, name='class_list_create'),
@@ -54,9 +60,11 @@ urlpatterns = [
     path('api/v1/classes/<int:class_id>/students/', get_class_students, name='class_students'),
     path('api/v1/classes/<int:class_id>/add-student/', add_student_to_class, name='add_student'),
     path('api/v1/classes/<int:class_id>/remove-student/<int:student_id>/', remove_student_from_class, name='remove_student'),
+    path('api/v1/classes/<int:class_id>/update-student/<int:student_id>/', update_student_in_class, name='update_student'),
 
     # Student enrolled classes
     path('api/v1/students/my-classes/', get_student_enrolled_classes, name='student_enrolled_classes'),
+    path('api/v1/students/my-attendance/', get_student_attendance_history, name='student_attendance_history'),
     
     # Session management
     path('api/v1/sessions/create/', create_session, name='create_session'),
@@ -65,7 +73,16 @@ urlpatterns = [
     path('api/v1/sessions/<uuid:session_id>/mark/', mark_attendance, name='mark_attendance'),
     path('api/v1/sessions/<uuid:session_id>/end/', end_session, name='end_session'),
     
+    # Manual mark attendance
+    path('api/v1/sessions/<uuid:session_id>/mark-student/', manual_mark_attendance, name='manual_mark_attendance'),
+    
+    
+    # Teacher attendance history
+    path('api/v1/teachers/attendance-history/', get_teacher_attendance_history, name='teacher_attendance_history'),
+    path('api/v1/attendance/<int:record_id>/update/', update_attendance_status, name='update_attendance'),
+    path('api/v1/sessions/<uuid:session_id>/attendance/', get_session_attendance_details, name='session_attendance_details'),
+
+    
     # Utility
     path('api/v1/ping/', ping, name='ping'),
-    path('api/v1/students/my-attendance/', get_student_attendance_history, name='student_attendance_history'),
 ]

@@ -10,7 +10,8 @@ class LoginPage extends StatefulWidget {
 }
 
 class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
-  final TextEditingController _usernameController = TextEditingController();
+  
+  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   late AnimationController _fadeController;
@@ -38,13 +39,13 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
   @override
   void dispose() {
     _fadeController.dispose();
-    _usernameController.dispose();
+    _emailController.dispose();  
     _passwordController.dispose();
     super.dispose();
   }
 
   bool get _isFormValid =>
-      _usernameController.text.isNotEmpty &&
+      _emailController.text.isNotEmpty &&  
       _passwordController.text.isNotEmpty;
 
   @override
@@ -134,15 +135,16 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                             ),
                             const SizedBox(height: 40),
 
-                            // Username Field
+                            
                             _buildTextField(
-                              controller: _usernameController,
-                              hint: 'Username',
-                              icon: Icons.person_outline_rounded,
+                              controller: _emailController,
+                              hint: 'Email',  
+                              icon: Icons.email_outlined,  
+                              keyboardType: TextInputType.emailAddress,  // ✅ ADDED
                             ),
                             const SizedBox(height: 20),
 
-                            // Password Field
+                            // Password Field (unchanged)
                             _buildTextField(
                               controller: _passwordController,
                               hint: 'Password',
@@ -226,6 +228,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                             const SizedBox(height: 24),
 
                             // Sign Up Link
+                            /* 
                             Row(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
@@ -252,6 +255,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
                                 ),
                               ],
                             ),
+                            */
                           ],
                         ),
                       ),
@@ -266,12 +270,14 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     );
   }
 
+  
   Widget _buildTextField({
     required TextEditingController controller,
     required String hint,
     required IconData icon,
     bool obscureText = false,
     Widget? suffixIcon,
+    TextInputType keyboardType = TextInputType.text,  
   }) {
     return Container(
       decoration: BoxDecoration(
@@ -288,6 +294,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
       child: TextField(
         controller: controller,
         obscureText: obscureText,
+        keyboardType: keyboardType,  
         onChanged: (_) => setState(() {}),
         style: const TextStyle(fontSize: 16),
         decoration: InputDecoration(
@@ -316,9 +323,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
     setState(() => _isLoading = true);
 
     try {
-      // Call Authservice
+      // 
       final result = await _authService.login(
-        _usernameController.text.trim(),
+        _emailController.text.trim(), 
         _passwordController.text.trim(),
       );
 
@@ -329,17 +336,18 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
         final role = await _authService.getUserRole();
 
         if (!mounted) return;
-        // ROute based on role
+        // Route based on role
         switch (role.toLowerCase()) {
           case 'teacher':
             Navigator.pushReplacementNamed(context, '/teacher');
+            
             _showSuccessSnackBar(
-                'Welcome back, ${_usernameController.text}!');
+                'Welcome back, ${_emailController.text}!');
             break;
           case 'student':
             Navigator.pushReplacementNamed(context, '/student');
             _showSuccessSnackBar(
-                'Welcome back, ${_usernameController.text}! ');
+                'Welcome back, ${_emailController.text}!');
             break;
           case 'admin':
             Navigator.pushReplacementNamed(context, '/admin');
@@ -350,7 +358,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             break;
         }
       } else {
-        _showErrorSnackBar('Invalid username or password');
+        _showErrorSnackBar('Invalid email or password');  
       }
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) {
