@@ -1,6 +1,6 @@
 class ApiConfig {
   //  Use your actual local IP
-  static const String _localIp = '192.168.1.7';
+  static const String _localIp = ''; // IP address
 
   // Choose based on where you're running
   static const String _computerBaseUrl = 'http://localhost:8000/api/v1';
