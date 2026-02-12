@@ -239,7 +239,7 @@ attendance/
 
 ---
 
-## 🔌 API Documentation
+## API Documentation
 
 ### Base URL
 ```
@@ -391,9 +391,13 @@ docker-compose down
 
 ---
 
-## 🤝 Contributing
+## Contributing
 
-We welcome contributions! Please follow these steps:
+We welcome contributions! 
+Please open a pull request for fixes or improvements.
+For larger changes, start a discussion first.
+
+Please follow these steps:
 
 ### 1. Fork the Repository
 
@@ -465,7 +469,7 @@ adb install build/app/outputs/flutter-apk/app-debug.apk
 
 ---
 
-## 🔧 Troubleshooting
+## Troubleshooting
 
 ### Backend Issues
 
@@ -530,7 +534,7 @@ docker-compose restart pgadmin
 
 ---
 
-## 🔐 Security Notes
+## Security Notes
 
 ### For Production Deployment:
 
@@ -557,7 +561,7 @@ docker-compose restart pgadmin
 
 ---
 
-## 📊 Admin Panel Access
+## Admin Panel Access
 
 After creating superuser, access:
 
@@ -572,7 +576,7 @@ Available sections:
 
 ---
 
-## 🌐 API Testing
+## API Testing
 
 ### Using cURL
 
@@ -608,7 +612,7 @@ curl -X GET http://localhost:8000/api/v1/auth/me/ \
 
 ---
 
-## 📱 Mobile App Features
+## Mobile App Features
 
 ### QR Code Scanning
 - Real-time QR code detection
@@ -626,7 +630,7 @@ curl -X GET http://localhost:8000/api/v1/auth/me/ \
 
 
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Django REST Framework documentation
 - Flutter documentation
