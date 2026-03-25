@@ -1,15 +1,24 @@
 class ApiConfig {
-  //  Use your actual local IP
-  static const String _localIp = ''; // IP address
+  // Local IP for physical phone testing on same Wi-Fi.
+  static const String _localIp = '';
 
-  // Choose based on where you're running
+  // Compile-time overrides:
+  // flutter run --dart-define=API_BASE_URL=https://your-backend.onrender.com/api/v1
+  static const String _apiBaseUrl = String.fromEnvironment('API_BASE_URL');
+
+  // Local defaults
   static const String _computerBaseUrl = 'http://localhost:8000/api/v1';
-  static const String _androidBaseUrl = 'http://$_localIp:8000/api/v1';
-  
-  // Auto-detect or manually set
+
   static String get baseUrl {
-    // For now, use local IP for both (works everywhere)
-    return _androidBaseUrl;
+    if (_apiBaseUrl.isNotEmpty) {
+      return _apiBaseUrl;
+    }
+
+    if (_localIp.isNotEmpty) {
+      return 'http://$_localIp:8000/api/v1';
+    }
+
+    return _computerBaseUrl;
   }
   
   // Connection settings

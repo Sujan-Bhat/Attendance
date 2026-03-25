@@ -4,10 +4,11 @@ Django==5.2.7
 django-cors-headers==4.9.0
 djangorestframework==3.16.1
 djangorestframework_simplejwt==5.5.1
+gunicorn==23.0.0
+whitenoise==6.9.0
 psycopg2-binary==2.9.11
 PyJWT==2.10.1
 python-dotenv==1.1.1
 sqlparse==0.5.3
-djangorestframework-simplejwt
 qrcode==7.4.2
 Pillow==10.4.0
