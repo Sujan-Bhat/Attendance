@@ -35,6 +35,10 @@ from attendance.views import (
     join_class,
     join_fallback,
     assetlinks_view,
+    announcement_list_create,
+    announcement_detail,
+    student_announcements,
+    low_attendance_students,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.static import serve as static_serve
@@ -91,6 +95,12 @@ urlpatterns = [
     path('api/v1/teachers/attendance-history/', get_teacher_attendance_history, name='teacher_attendance_history'),
     path('api/v1/attendance/<int:record_id>/update/', update_attendance_status, name='update_attendance'),
     path('api/v1/sessions/<uuid:session_id>/attendance/', get_session_attendance_details, name='session_attendance_details'),
+
+    # Announcements
+    path('api/v1/announcements/', announcement_list_create, name='announcement_list_create'),
+    path('api/v1/announcements/<int:announcement_id>/', announcement_detail, name='announcement_detail'),
+    path('api/v1/students/announcements/', student_announcements, name='student_announcements'),
+    path('api/v1/classes/<int:class_id>/low-attendance/', low_attendance_students, name='low_attendance_students'),
 
     # Utility
     path('api/v1/ping/', ping, name='ping'),

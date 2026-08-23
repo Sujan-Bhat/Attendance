@@ -23,8 +23,9 @@ from .serializers import (
     AttendanceRecordSerializer,
     TeacherAttendanceHistorySerializer,
     UpdateAttendanceStatusSerializer,
+    AnnouncementSerializer,
 )
-from .models import Class, Enrollment, StudentProfile, AttendanceSession, AttendanceRecord
+from .models import Class, Enrollment, StudentProfile, AttendanceSession, AttendanceRecord, Announcement
 from rest_framework_simplejwt.views import TokenObtainPairView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -1457,3 +1458,208 @@ def assetlinks_view(request):
             ]
         }
     }], safe=False)
+
+# ============================================================
+# ANNOUNCEMENTS
+# ============================================================
+
+from rest_framework.permissions import IsAuthenticated
+
+@api_view(['GET', 'POST'])
+@permission_classes([IsAuthenticated])
+def announcement_list_create(request):
+    """GET: list teacher's announcements. POST: create a new announcement."""
+    if request.user.role != 'teacher':
+        return Response({'error': 'Only teachers can manage announcements'}, status=403)
+
+    if request.method == 'GET':
+        announcements = Announcement.objects.filter(teacher=request.user)
+        serializer = AnnouncementSerializer(announcements, many=True)
+        return Response({'announcements': serializer.data})
+
+    # POST
+    target_type = request.data.get('target_type')
+    target_class_id = request.data.get('target_class_id')
+    target_student_id = request.data.get('target_student_id')
+    message = request.data.get('message', '').strip()
+    is_urgent = request.data.get('is_urgent', False)
+    attendance_threshold = request.data.get('attendance_threshold', 75.0)
+
+    if not message:
+        return Response({'error': 'Message is required'}, status=400)
+    if not target_type:
+        return Response({'error': 'Target type is required'}, status=400)
+    if target_type not in ['class', 'individual', 'low_attendance']:
+        return Response({'error': 'Invalid target type'}, status=400)
+
+    target_class = None
+    target_student = None
+
+    if target_type in ['class', 'low_attendance']:
+        if not target_class_id:
+            return Response({'error': 'Class is required for this target type'}, status=400)
+        try:
+            target_class = Class.objects.get(id=target_class_id, teacher=request.user)
+        except Class.DoesNotExist:
+            return Response({'error': 'Class not found'}, status=404)
+
+    if target_type == 'individual':
+        if not target_class_id:
+            return Response({'error': 'Class is required'}, status=400)
+        if not target_student_id:
+            return Response({'error': 'Student is required for individual announcements'}, status=400)
+        try:
+            target_class = Class.objects.get(id=target_class_id, teacher=request.user)
+        except Class.DoesNotExist:
+            return Response({'error': 'Class not found'}, status=404)
+        try:
+            target_student = User.objects.get(id=target_student_id, role='student')
+            # Verify student is enrolled in the class
+            if not Enrollment.objects.filter(class_obj=target_class, student=target_student, status='enrolled').exists():
+                return Response({'error': 'Student is not enrolled in this class'}, status=400)
+        except User.DoesNotExist:
+            return Response({'error': 'Student not found'}, status=404)
+
+    announcement = Announcement.objects.create(
+        teacher=request.user,
+        target_type=target_type,
+        target_class=target_class,
+        target_student=target_student,
+        message=message,
+        is_urgent=is_urgent,
+        attendance_threshold=float(attendance_threshold),
+    )
+
+    serializer = AnnouncementSerializer(announcement)
+    return Response({'message': 'Announcement sent successfully', 'announcement': serializer.data}, status=201)
+
+
+@api_view(['GET', 'PUT', 'DELETE'])
+@permission_classes([IsAuthenticated])
+def announcement_detail(request, announcement_id):
+    """GET/PUT/DELETE a specific announcement (teacher only, own announcements)."""
+    if request.user.role != 'teacher':
+        return Response({'error': 'Only teachers can manage announcements'}, status=403)
+
+    try:
+        announcement = Announcement.objects.get(id=announcement_id, teacher=request.user)
+    except Announcement.DoesNotExist:
+        return Response({'error': 'Announcement not found'}, status=404)
+
+    if request.method == 'GET':
+        serializer = AnnouncementSerializer(announcement)
+        return Response(serializer.data)
+
+    if request.method == 'PUT':
+        message = request.data.get('message', announcement.message).strip()
+        is_urgent = request.data.get('is_urgent', announcement.is_urgent)
+        if not message:
+            return Response({'error': 'Message cannot be empty'}, status=400)
+        announcement.message = message
+        announcement.is_urgent = is_urgent
+        announcement.save()
+        serializer = AnnouncementSerializer(announcement)
+        return Response({'message': 'Announcement updated', 'announcement': serializer.data})
+
+    if request.method == 'DELETE':
+        announcement.delete()
+        return Response({'message': 'Announcement deleted'}, status=200)
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def student_announcements(request):
+    """GET: list announcements visible to the authenticated student."""
+    if request.user.role != 'student':
+        return Response({'error': 'Only students can view student announcements'}, status=403)
+
+    # Get all classes the student is enrolled in
+    enrolled_class_ids = Enrollment.objects.filter(
+        student=request.user, status='enrolled'
+    ).values_list('class_obj_id', flat=True)
+
+    from django.db.models import Q
+
+    # Class-wide announcements for enrolled classes
+    class_q = Q(target_type='class', target_class_id__in=enrolled_class_ids)
+
+    # Individual announcements addressed to this student
+    individual_q = Q(target_type='individual', target_student=request.user)
+
+    # Low-attendance announcements: need to check attendance per class
+    low_att_announcements_ids = []
+    low_att_announcements = Announcement.objects.filter(
+        target_type='low_attendance', target_class_id__in=enrolled_class_ids
+    )
+    for ann in low_att_announcements:
+        # Calculate student's attendance percentage in this class
+        total_sessions = AttendanceSession.objects.filter(class_obj=ann.target_class).exclude(status='active').count()
+        if total_sessions == 0:
+            continue
+        attended = AttendanceRecord.objects.filter(
+            session__class_obj=ann.target_class,
+            student=request.user,
+            status='present'
+        ).exclude(session__status='active').count()
+        percentage = (attended / total_sessions) * 100
+        if percentage < ann.attendance_threshold:
+            low_att_announcements_ids.append(ann.id)
+
+    low_att_q = Q(id__in=low_att_announcements_ids)
+
+    announcements = Announcement.objects.filter(
+        class_q | individual_q | low_att_q
+    ).distinct().order_by('-created_at')
+
+    serializer = AnnouncementSerializer(announcements, many=True)
+    return Response({'announcements': serializer.data})
+
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def low_attendance_students(request, class_id):
+    """GET: list students in a class whose attendance is below a threshold."""
+    if request.user.role != 'teacher':
+        return Response({'error': 'Only teachers can view this'}, status=403)
+
+    try:
+        class_obj = Class.objects.get(id=class_id, teacher=request.user)
+    except Class.DoesNotExist:
+        return Response({'error': 'Class not found'}, status=404)
+
+    threshold = float(request.query_params.get('threshold', 75.0))
+    total_sessions = AttendanceSession.objects.filter(class_obj=class_obj).exclude(status='active').count()
+
+    students_below = []
+    enrollments = Enrollment.objects.filter(class_obj=class_obj, status='enrolled').select_related('student')
+
+    for enrollment in enrollments:
+        if total_sessions == 0:
+            percentage = 100.0
+        else:
+            attended = AttendanceRecord.objects.filter(
+                session__class_obj=class_obj,
+                student=enrollment.student,
+                status='present'
+            ).exclude(session__status='active').count()
+            percentage = (attended / total_sessions) * 100
+
+        if percentage < threshold:
+            students_below.append({
+                'id': enrollment.student.id,
+                'username': enrollment.student.username,
+                'first_name': enrollment.student.first_name,
+                'last_name': enrollment.student.last_name,
+                'email': enrollment.student.email,
+                'attendance_percentage': round(percentage, 1),
+            })
+
+    return Response({
+        'class_name': class_obj.class_name,
+        'class_code': class_obj.class_code,
+        'threshold': threshold,
+        'total_sessions': total_sessions,
+        'students': students_below,
+        'total': len(students_below),
+        'count': len(students_below),
+    })

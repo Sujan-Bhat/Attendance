@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
-from .models import User, StudentProfile, Class, Enrollment, AttendanceSession, AttendanceRecord
+from .models import User, StudentProfile, Class, Enrollment, AttendanceSession, AttendanceRecord, Announcement
 
 @admin.register(User)
 class UserAdmin(BaseUserAdmin):
@@ -56,19 +56,6 @@ class EnrollmentAdmin(admin.ModelAdmin):
     raw_id_fields = ('class_obj', 'student')
 
 
-# @admin.register(AttendanceSession)
-# class AttendanceSessionAdmin(admin.ModelAdmin):
-#     list_display = ('class_obj', 'date', 'start_time', 'end_time', 'qr_code_generated', 'created_at')
-#     list_filter = ('date', 'qr_code_generated', 'created_at')
-#     search_fields = ('class_obj__class_code', 'class_obj__class_name')
-#     readonly_fields = ('qr_code', 'created_at')
-#     ordering = ['-date', '-start_time']
-    
-#     def get_queryset(self, request):
-#         qs = super().get_queryset(request)
-#         return qs.select_related('class_obj', 'class_obj__teacher')
-
-
 @admin.register(AttendanceSession)
 class AttendanceSessionAdmin(admin.ModelAdmin):
     list_display = ('session_id', 'class_obj', 'teacher', 'start_time', 'end_time', 'status', 'is_active')
@@ -105,3 +92,9 @@ class AttendanceRecordAdmin(admin.ModelAdmin):
     def get_session_date(self, obj):
         return obj.session.start_time.strftime('%Y-%m-%d %H:%M')
     get_session_date.short_description = 'Session Date/Time'
+
+@admin.register(Announcement)
+class AnnouncementAdmin(admin.ModelAdmin):
+    list_display = ('teacher', 'target_type', 'is_urgent', 'created_at')
+    list_filter = ('target_type', 'is_urgent', 'created_at')
+    search_fields = ('teacher__username', 'message', 'target_class__class_name')

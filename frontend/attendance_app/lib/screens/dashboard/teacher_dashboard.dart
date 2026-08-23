@@ -6,6 +6,7 @@ import '../teacher/my_classes_screen.dart';
 import '../teacher/session_create_screen.dart';
 import '../teacher/teacher_attendance_history_screen.dart';
 import '../teacher/teacher_profile_screen.dart';
+import '../teacher/teacher_announcements_screen.dart';
 
 class TeacherDashboardPage extends StatefulWidget {
   const TeacherDashboardPage({super.key});
@@ -55,6 +56,12 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage>
       'subtitle': 'View your profile',
       'icon': Icons.person_rounded,
       'color': Colors.blueGrey,
+    },
+    {
+      'title': 'Announcements',
+      'subtitle': 'Send updates to classes',
+      'icon': Icons.campaign_rounded,
+      'color': Colors.red,
     },
   ];
 
@@ -190,6 +197,15 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage>
         ).then((_) {
           _loadUserData(forceRefresh: true);
         });
+        break;
+
+      case 'Announcements':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const TeacherAnnouncementsScreen(),
+          ),
+        );
         break;
 
       //  REMOVED: Class Insights and Reports cases

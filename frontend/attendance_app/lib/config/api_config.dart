@@ -8,7 +8,7 @@ class ApiConfig {
 
   // Local defaults
   static const String _computerBaseUrl = 'https://attendance-production-5fb3.up.railway.app/api/v1';
-
+// static const String _computerBaseUrl ='http://127.0.0.1:8000/api/v1';
   static String get baseUrl {
     if (_apiBaseUrl.isNotEmpty) {
       return _apiBaseUrl;
@@ -30,6 +30,10 @@ class ApiConfig {
   static String register = '$baseUrl/auth/register/';
   static String me = '$baseUrl/auth/me/';
   static String tokenRefresh = '$baseUrl/auth/token/refresh/';
+  
+  // Announcement endpoints
+  static String announcements = '$baseUrl/announcements/';
+  static String studentAnnouncements = '$baseUrl/students/announcements/';
   
   // Headers
   static Map<String, String> get headers => {

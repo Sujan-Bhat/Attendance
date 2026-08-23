@@ -9,6 +9,7 @@ import '../student/qr_scanner_screen.dart';
 import '../student/attendance_history_screen.dart';
 import '../student/student_profile_screen.dart';
 import '../../services/offline_sync_service.dart';
+import '../student/student_announcements_screen.dart';
 
 class StudentDashboardPage extends StatefulWidget {
   const StudentDashboardPage({super.key});
@@ -61,6 +62,12 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
       'subtitle': 'Manage your account',
       'icon': Icons.person_rounded,
       'color': Colors.orange,
+    },
+    {
+      'title': 'Announcements',
+      'subtitle': 'View updates from teachers',
+      'icon': Icons.campaign_rounded,
+      'color': Colors.red,
     },
   ];
 
@@ -241,6 +248,15 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         ).then((_) {
           _loadUserData(forceRefresh: true);
         });
+        break;
+
+      case 'Announcements':
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => const StudentAnnouncementsScreen(),
+          ),
+        );
         break;
 
       default:

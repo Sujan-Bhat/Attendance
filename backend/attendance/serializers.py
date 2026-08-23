@@ -2,7 +2,7 @@ from rest_framework import serializers
 from django.contrib.auth import get_user_model, authenticate
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError as DjangoValidationError
-from .models import StudentProfile, Class, Enrollment, AttendanceSession, AttendanceRecord
+from .models import StudentProfile, Class, Enrollment, AttendanceSession, AttendanceRecord, Announcement
 import json
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
 
@@ -384,3 +384,21 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
         # Add user data to response
         data['user'] = UserSerializer(self.user).data
         return data
+
+class AnnouncementSerializer(serializers.ModelSerializer):
+    teacher_name = serializers.CharField(source='teacher.username', read_only=True)
+    teacher_first_name = serializers.CharField(source='teacher.first_name', read_only=True)
+    target_class_name = serializers.CharField(source='target_class.class_name', read_only=True, default=None)
+    target_class_code = serializers.CharField(source='target_class.class_code', read_only=True, default=None)
+    target_student_name = serializers.CharField(source='target_student.username', read_only=True, default=None)
+
+    class Meta:
+        model = Announcement
+        fields = [
+            'id', 'teacher', 'teacher_name', 'teacher_first_name',
+            'target_type', 'target_class', 'target_class_name', 'target_class_code',
+            'target_student', 'target_student_name',
+            'message', 'is_urgent', 'attendance_threshold',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['id', 'teacher', 'created_at', 'updated_at']

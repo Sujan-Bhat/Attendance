@@ -167,3 +167,28 @@ class AttendanceRecord(models.Model):
 
     def __str__(self):
         return f"{self.student.username} - {self.session.class_obj.class_code} - {self.status}"
+
+class Announcement(models.Model):
+    """Table for teacher announcements to classes or individual students"""
+    TARGET_CHOICES = (
+        ('class', 'Entire Class'),
+        ('individual', 'Individual Student'),
+        ('low_attendance', 'Low Attendance Students'),
+    )
+
+    teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='announcements', limit_choices_to={'role': 'teacher'})
+    target_type = models.CharField(max_length=20, choices=TARGET_CHOICES)
+    target_class = models.ForeignKey(Class, on_delete=models.CASCADE, related_name='announcements', null=True, blank=True)
+    target_student = models.ForeignKey(User, on_delete=models.CASCADE, related_name='received_announcements', null=True, blank=True, limit_choices_to={'role': 'student'})
+    message = models.TextField()
+    is_urgent = models.BooleanField(default=False)
+    attendance_threshold = models.FloatField(default=75.0)  # Only used for 'low_attendance' target
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'announcements'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.teacher.username} -> {self.target_type} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
