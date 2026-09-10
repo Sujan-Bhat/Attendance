@@ -21,3 +21,4 @@ numpy==2.2.6
 python-dateutil==2.9.0.post0
 insightface==1.0.1
 onnxruntime==1.28.0
+openpyxl==3.1.5

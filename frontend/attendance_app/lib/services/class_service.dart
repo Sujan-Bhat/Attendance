@@ -180,6 +180,27 @@ class ClassService {
     }
   }
 
+  /// Admin: Get pre-registered students (assigned a semester, not yet enrolled)
+  Future<Map<String, dynamic>> getAdminUnassignedStudents() async {
+    try {
+      final token = await _getToken();
+
+      final response = await _dio.get(
+        '/admin/students/unassigned/',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      if (response.statusCode == 200) {
+        return response.data;
+      }
+
+      return {'students': [], 'total': 0};
+    } catch (e) {
+      print('Error fetching unassigned students: $e');
+      return {'students': [], 'total': 0};
+    }
+  }
+
   /// Admin: Get all teachers with their class details
   Future<Map<String, dynamic>> getTeachers() async {
     try {
@@ -243,6 +264,30 @@ class ClassService {
     } catch (e) {
       print('Error fetching students: $e');
       return [];
+    }
+  }
+
+  /// Get the full roster for a class: enrolled students plus same-semester
+  /// students who are still available to be added.
+  /// Returns {class_code, class_name, semester, students, total,
+  ///          available_students, total_available} or null on failure.
+  Future<Map<String, dynamic>?> getClassRoster(int classId) async {
+    try {
+      final token = await _getToken();
+
+      final response = await _dio.get(
+        '/classes/$classId/students/',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      if (response.statusCode == 200 && response.data is Map) {
+        return Map<String, dynamic>.from(response.data);
+      }
+
+      return null;
+    } catch (e) {
+      print('Error fetching class roster: $e');
+      return null;
     }
   }
 
@@ -361,6 +406,7 @@ class ClassService {
     required String email,
     required String password,
     required String role,
+    String? semester,
   }) async {
     try {
       final token = await _getToken();
@@ -372,6 +418,7 @@ class ClassService {
           'email': email,
           'password': password,
           'role': role,
+          if (semester != null && semester.isNotEmpty) 'semester': semester,
         },
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
@@ -400,6 +447,45 @@ class ClassService {
       return {
         'success': false,
         'error': e.response?.data['error'] ?? 'Failed to delete user',
+      };
+    }
+  }
+
+  /// Admin: Permanently delete a student from the database
+  Future<Map<String, dynamic>> adminDeleteStudent(int studentId) async {
+    try {
+      final token = await _getToken();
+
+      final response = await _dio.delete(
+        '/admin/students/$studentId/delete/',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'error': e.response?.data['error'] ?? 'Failed to delete student',
+      };
+    }
+  }
+
+  /// Admin: Permanently delete every student of a given semester
+  Future<Map<String, dynamic>> adminDeleteAllStudents(String semester) async {
+    try {
+      final token = await _getToken();
+
+      final response = await _dio.delete(
+        '/admin/students/delete-all/$semester/',
+        data: {'confirm': true},
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      return response.data;
+    } on DioException catch (e) {
+      return {
+        'success': false,
+        'error': e.response?.data['error'] ?? 'Failed to delete students',
       };
     }
   }
@@ -528,6 +614,7 @@ class ClassService {
     String? classCode,
     String? className,
     String? semester,
+    int? teacherId,
   }) async {
     try {
       final token = await _getToken();
@@ -538,6 +625,7 @@ class ClassService {
           if (classCode != null) 'class_code': classCode,
           if (className != null) 'class_name': className,
           if (semester != null) 'semester': semester,
+          if (teacherId != null) 'teacher_id': teacherId,
         },
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );

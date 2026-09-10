@@ -236,7 +236,8 @@ class CreateClassSerializer(serializers.Serializer):  # Changed from ModelSerial
                 
                 # Create StudentProfile
                 StudentProfile.objects.create(
-                    student=user
+                    student=user,
+                    semester=class_obj.semester
                 )
                 
                 # Create Enrollment

@@ -30,6 +30,7 @@ class StudentProfile(models.Model):
         related_name='student_profile',
         limit_choices_to={'role': 'student'}
     )
+    semester = models.CharField(max_length=50, blank=True, null=True)
 
     class Meta:
         db_table = 'student_profiles'  # Table name in PostgreSQL

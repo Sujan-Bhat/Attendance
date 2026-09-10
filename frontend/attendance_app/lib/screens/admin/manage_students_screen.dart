@@ -1,26 +1,28 @@
 import 'package:flutter/material.dart';
 import '../../services/class_service.dart';
+import '../../widgets/admin_web_layout.dart';
 import 'semester_classes_screen.dart';
+import 'widgets/add_student_dialog.dart';
+import 'widgets/admin_animated_card.dart';
+import 'widgets/admin_entrance.dart';
+import 'widgets/admin_header_actions.dart';
 
 abstract class _AppColors {
   static const tealDark = Color(0xFF007C91);
   static const teal = Color(0xFF0097A7);
-  static const tealLight = Color(0xFF0288A3);
-  static const background = Color(0xFFF7FAFC);
-  static const darkBg = Color(0xFF1E1E2D);
   static const textPrimary = Color(0xFF1F2937);
   static const textMuted = Color(0xFF6B7280);
 }
 
 class _SemesterCard {
-  final int semester;
+  final String semesterDisplay;
   final String semesterLabel;
   final int studentCount;
   final Color color;
   final List<Color> gradient;
 
   const _SemesterCard({
-    required this.semester,
+    required this.semesterDisplay,
     required this.semesterLabel,
     required this.studentCount,
     required this.color,
@@ -36,8 +38,8 @@ class ManageStudentsScreen extends StatefulWidget {
 }
 
 class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
-  bool _isSidebarExpanded = false;
   bool _isLoading = false;
+  String? _errorMessage;
   final ClassService _classService = ClassService();
   List<_SemesterCard> _semesters = [];
 
@@ -48,7 +50,10 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
   }
 
   Future<void> _loadSemesters() async {
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
 
     try {
       final summary = await _classService.getAdminClassesSummary();
@@ -78,9 +83,12 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
             final data = entry.value;
             final semesterStr = data['semester']?.toString() ?? '';
             return _SemesterCard(
-              semester: int.tryParse(semesterStr) ?? index + 1,
+              semesterDisplay: _semesterDisplay(semesterStr),
               semesterLabel: semesterStr,
-              studentCount: data['student_count'] ?? 0,
+              studentCount:
+                  int.tryParse(data['total_students']?.toString() ?? '') ??
+                      int.tryParse(data['student_count']?.toString() ?? '') ??
+                      0,
               color: colorPalette[index % colorPalette.length],
               gradient: gradientPalette[index % gradientPalette.length],
             );
@@ -89,30 +97,40 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         });
       }
     } catch (e) {
-      print('Error loading semesters: $e');
+      debugPrint('Error loading semesters: $e');
       if (mounted) {
-        setState(() => _isLoading = false);
+        setState(() {
+          _isLoading = false;
+          _errorMessage = 'Could not load class summaries. Please try again.';
+        });
       }
     }
+  }
+
+  String _semesterDisplay(String raw) {
+    final trimmed = raw.trim();
+    return int.tryParse(trimmed) != null ? 'Semester $trimmed' : trimmed;
   }
 
   @override
   Widget build(BuildContext context) {
     final screenW = MediaQuery.of(context).size.width;
     final isMobile = screenW < 600;
-    final isDesktop = screenW >= 1024;
 
-    if (isDesktop) return _buildDesktopLayout();
+    return AdminWebLayout(
+      currentRoute: 'Manage Students',
+      mobileChild: _buildMobileBody(isMobile),
+      desktopBody: _buildDesktopBody(),
+    );
+  }
 
+  Widget _buildMobileBody(bool isMobile) {
     final crossAxisCount = isMobile ? 1 : 2;
 
-    return Scaffold(
-      backgroundColor: _AppColors.background,
-      appBar: _buildTopBar(isMobile),
-      drawer: _buildMobileDrawer(),
-      body: Stack(
-        children: [
-          SafeArea(
+    return Stack(
+      children: [
+        SafeArea(
+          child: AdminEntrance(
             child: SingleChildScrollView(
               physics: const BouncingScrollPhysics(),
               child: Padding(
@@ -122,15 +140,8 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
                   children: [
                     _buildHeaderSection(isMobile),
                     const SizedBox(height: 24),
-                    _isLoading
-                        ? const Center(
-                            child: Padding(
-                              padding: EdgeInsets.only(top: 60),
-                              child: CircularProgressIndicator(
-                                valueColor: AlwaysStoppedAnimation<Color>(_AppColors.teal),
-                              ),
-                            ),
-                          )
+                    _errorMessage != null
+                        ? _buildErrorState()
                         : _semesters.isEmpty
                             ? _buildEmptyState()
                             : _buildSemesterGrid(crossAxisCount, isMobile),
@@ -139,87 +150,58 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
               ),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDesktopLayout() {
-    return Scaffold(
-      backgroundColor: _AppColors.background,
-      body: SafeArea(
-        child: Row(
-          children: [
-            _buildDesktopSidebar(),
-            Expanded(
-              child: SingleChildScrollView(
-                physics: const BouncingScrollPhysics(),
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(40, 20, 40, 40),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildDesktopHeader(),
-                      const SizedBox(height: 32),
-                      _isLoading
-                          ? const Center(
-                              child: Padding(
-                                padding: EdgeInsets.only(top: 60),
-                                child: CircularProgressIndicator(
-                                  valueColor: AlwaysStoppedAnimation<Color>(_AppColors.teal),
-                                ),
-                              ),
-                            )
-                          : _semesters.isEmpty
-                              ? _buildEmptyState()
-                              : _buildSemesterGrid(3, false),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ],
         ),
-      ),
+        if (_isLoading) _buildLoadingOverlay(),
+      ],
     );
   }
 
-  PreferredSizeWidget _buildTopBar(bool isMobile) {
-    return AppBar(
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      leading: IconButton(
-        icon: const Icon(Icons.arrow_back_rounded, color: _AppColors.textPrimary),
-        onPressed: () => Navigator.pop(context),
-      ),
-      title: Row(
-        children: [
-          Container(
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [_AppColors.tealDark, _AppColors.teal],
+  Widget _buildDesktopBody() {
+    return Stack(
+      children: [
+        AdminEntrance(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(40, 20, 40, 40),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildDesktopHeader(),
+                  const SizedBox(height: 24),
+                  _errorMessage != null
+                      ? _buildErrorState()
+                      : _semesters.isEmpty
+                          ? _buildEmptyState()
+                          : _buildSemesterGrid(3, false),
+                ],
               ),
-              shape: BoxShape.circle,
-            ),
-            padding: const EdgeInsets.all(8),
-            child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 20),
-          ),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Manage Students',
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: _AppColors.textPrimary,
-              ),
-              overflow: TextOverflow.ellipsis,
             ),
           ),
-        ],
-      ),
+        ),
+        if (_isLoading) _buildLoadingOverlay(),
+      ],
     );
   }
+
+  Widget _buildLoadingOverlay() => Container(
+        color: Colors.black26,
+        child: const Center(
+          child: Card(
+            child: Padding(
+              padding: EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 16),
+                  Text('Loading...'),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
 
   Widget _buildDesktopHeader() {
     return Row(
@@ -227,13 +209,16 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         Container(
           width: 76,
           height: 76,
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
+          decoration: const BoxDecoration(
+            // BUG FIX: was BorderRadius.circular(63.5) on a 76x76 box, which
+            // doesn't correspond to any meaningful dimension. Using
+            // BoxShape.circle is correct regardless of the box size.
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
               colors: [_AppColors.tealDark, _AppColors.teal],
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
             ),
-            borderRadius: BorderRadius.circular(63.5),
           ),
           child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 38),
         ),
@@ -264,126 +249,27 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
             ],
           ),
         ),
+        ElevatedButton.icon(
+          onPressed: _showAddStudentDialog,
+          icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
+          label: const Text('Add Student'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _AppColors.tealDark,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        ),
+        const SizedBox(width: 16),
+        AdminHeaderActions(onRefresh: _loadSemesters, showLogout: false),
         IconButton(
           icon: const Icon(Icons.arrow_back_rounded, color: _AppColors.textPrimary),
           onPressed: () => Navigator.pop(context),
           tooltip: 'Back',
         ),
       ],
-    );
-  }
-
-  Widget _buildDesktopSidebar() {
-    return AnimatedContainer(
-      duration: const Duration(milliseconds: 300),
-      width: _isSidebarExpanded ? 220 : 72,
-      decoration: const BoxDecoration(color: _AppColors.darkBg),
-      child: Column(
-        children: [
-          const SizedBox(height: 24),
-          Container(
-            width: 48,
-            height: 48,
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [_AppColors.tealDark, _AppColors.teal],
-              ),
-              borderRadius: BorderRadius.circular(24),
-            ),
-            child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 26),
-          ),
-          IconButton(
-            icon: Icon(
-              _isSidebarExpanded ? Icons.chevron_left : Icons.chevron_right,
-              color: Colors.white70,
-            ),
-            onPressed: () =>
-                setState(() => _isSidebarExpanded = !_isSidebarExpanded),
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: ListView(
-              padding: EdgeInsets.zero,
-              children: [
-                _buildSidebarItem(Icons.dashboard_rounded, 'Dashboard'),
-                _buildSidebarItem(Icons.people_alt_rounded, 'Students'),
-              ],
-            ),
-          ),
-          _buildSidebarItem(Icons.arrow_back_rounded, 'Back'),
-          const SizedBox(height: 20),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSidebarItem(
-    IconData icon,
-    String title, {
-    bool isMobile = false,
-  }) {
-    final showLabel = _isSidebarExpanded || isMobile;
-    return Tooltip(
-      message: showLabel ? '' : title,
-      child: ListTile(
-        leading: Icon(icon, color: Colors.white70, size: isMobile ? 24 : 20),
-        title: showLabel
-            ? Text(title,
-                style: const TextStyle(color: Colors.white, fontSize: 14))
-            : null,
-        onTap: () {
-          if (title == 'Back' || title == 'Dashboard') {
-            Navigator.pop(context);
-          }
-        },
-      ),
-    );
-  }
-
-  Widget _buildMobileDrawer() {
-    return Drawer(
-      child: Container(
-        decoration: const BoxDecoration(color: _AppColors.darkBg),
-        child: ListView(
-          children: [
-            DrawerHeader(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [_AppColors.tealDark, _AppColors.teal],
-                ),
-              ),
-              child: const Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  CircleAvatar(
-                    radius: 30,
-                    backgroundColor: Colors.white,
-                    child: Icon(
-                      Icons.people_alt_rounded,
-                      size: 35,
-                      color: _AppColors.tealDark,
-                    ),
-                  ),
-                  SizedBox(height: 10),
-                  Text(
-                    'Manage Students',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            _buildSidebarItem(Icons.dashboard_rounded, 'Dashboard', isMobile: true),
-            _buildSidebarItem(Icons.people_alt_rounded, 'Students', isMobile: true),
-            const Divider(color: Colors.white24),
-            _buildSidebarItem(Icons.arrow_back_rounded, 'Back', isMobile: true),
-          ],
-        ),
-      ),
     );
   }
 
@@ -397,23 +283,32 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
           ),
         const Icon(Icons.people_alt_rounded, color: _AppColors.tealDark, size: 32),
         const SizedBox(width: 12),
-        Text(
-          'Manage Students',
-          style: TextStyle(
-            fontSize: isMobile ? 22 : 28,
-            fontWeight: FontWeight.w700,
-            color: _AppColors.textPrimary,
+        Expanded(
+          child: Text(
+            'Manage Students',
+            style: TextStyle(
+              fontSize: isMobile ? 22 : 28,
+              fontWeight: FontWeight.w700,
+              color: _AppColors.textPrimary,
+            ),
           ),
         ),
+        IconButton(
+          icon: const Icon(Icons.person_add_alt_1_rounded, color: _AppColors.tealDark, size: 26),
+          onPressed: _showAddStudentDialog,
+          tooltip: 'Add Student',
+        ),
+        const SizedBox(width: 8),
+        AdminHeaderActions(onRefresh: _loadSemesters, showLogout: false),
       ],
     );
   }
 
   Widget _buildSemesterGrid(int crossAxisCount, bool isMobile) {
-    final isCompact = crossAxisCount < 3;
-    final childAspectRatio = crossAxisCount == 1
-        ? 1.35
-        : (crossAxisCount == 2 ? 1.45 : 1.6);
+    final isCompact = isMobile || crossAxisCount == 2;
+    final childAspectRatio = isMobile
+        ? 0.96
+        : (crossAxisCount == 2 ? 1.22 : 1.6);
 
     return GridView.builder(
       itemCount: _semesters.length,
@@ -421,11 +316,83 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
       shrinkWrap: true,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
-        mainAxisSpacing: isCompact ? 20 : 42,
-        crossAxisSpacing: isCompact ? 16 : 55,
+        mainAxisSpacing: isMobile ? 18 : 42,
+        crossAxisSpacing: isMobile ? 18 : 55,
         childAspectRatio: childAspectRatio,
       ),
-      itemBuilder: (context, idx) => _buildSemesterCard(_semesters[idx], isCompact),
+      itemBuilder: (context, idx) {
+        final semester = _semesters[idx];
+        final animated = AdminAnimatedCard(
+          title: semester.semesterDisplay,
+          subtitle: '${semester.studentCount} Students',
+          icon: Icons.school_rounded,
+          color: semester.color,
+          gradient: semester.gradient,
+          onTap: () => _openSemester(semester),
+          trailing: Icon(
+            Icons.arrow_forward_ios_rounded,
+            color: semester.color,
+            size: 20,
+          ),
+        );
+        if (isCompact) {
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 340),
+              child: animated,
+            ),
+          );
+        }
+        return animated;
+      },
+    );
+  }
+
+  Future<void> _openSemester(_SemesterCard semester) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => SemesterClassesScreen(
+          semesterLabel: semester.semesterLabel,
+          semesterDisplay: semester.semesterDisplay,
+          totalEnrollments: semester.studentCount,
+        ),
+      ),
+    );
+    _loadSemesters();
+  }
+
+  Widget _buildErrorState() {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.error_outline_rounded, size: 72, color: Colors.red.shade300),
+          const SizedBox(height: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 32),
+            child: Text(
+              _errorMessage!,
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 15,
+                color: _AppColors.textMuted,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ),
+          const SizedBox(height: 16),
+          ElevatedButton.icon(
+            onPressed: _loadSemesters,
+            icon: const Icon(Icons.refresh_rounded, size: 18),
+            label: const Text('Try again'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _AppColors.tealDark,
+              foregroundColor: Colors.white,
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -461,102 +428,11 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
     );
   }
 
-  Widget _buildSemesterCard(_SemesterCard semester, bool isCompact) {
-    return InkWell(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (context) => SemesterClassesScreen(
-              semesterLabel: semester.semesterLabel,
-              semesterDisplay: 'Semester ${semester.semester}',
-            ),
-          ),
-        );
-      },
-      borderRadius: BorderRadius.circular(43),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: isCompact ? 20 : 32,
-          vertical: isCompact ? 18 : 24,
-        ),
-        decoration: ShapeDecoration(
-          gradient: LinearGradient(
-            begin: const Alignment(-0.05, -0.07),
-            end: const Alignment(1.18, 1.28),
-            colors: semester.gradient,
-          ),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(43),
-            side: const BorderSide(color: Color(0xFFE5E7EB), width: 1.5),
-          ),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.center,
-              children: [
-                Container(
-                  width: isCompact ? 52 : 68,
-                  height: isCompact ? 52 : 68,
-                  padding: EdgeInsets.all(isCompact ? 8 : 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.25),
-                    border: Border.all(
-                      color: semester.color.withOpacity(0.70),
-                      width: 1.5,
-                    ),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(
-                    Icons.school_rounded,
-                    color: semester.color,
-                    size: isCompact ? 22 : 30,
-                  ),
-                ),
-                SizedBox(width: isCompact ? 12 : 16),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Semester ${semester.semester}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.black,
-                          fontSize: 18,
-                          fontFamily: 'Inter',
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        '${semester.studentCount} Students',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.black87,
-                          fontSize: 13,
-                          fontFamily: 'Inter',
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  Icons.arrow_forward_ios_rounded,
-                  color: semester.color,
-                  size: isCompact ? 16 : 20,
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
+  void _showAddStudentDialog() {
+    AddStudentDialog.show(
+      context: context,
+      classService: _classService,
+      onStudentCreated: _loadSemesters,
     );
   }
 }

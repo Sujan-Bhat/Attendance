@@ -149,22 +149,34 @@ Open in browser:
 
 ### **Step 3: Frontend Setup**
 
-#### 3.1 Navigate to Flutter Project
+The Flutter app is a single codebase for Web/Android/iOS. The web app is
+**served by Django** at `http://localhost:8000/` (Django also hosts the
+`/api/v1` REST API and `/admin/`).
+
+#### 3.1 Serve the Web App via Django (recommended)
+
+```bash
+# From the repository root, build Flutter web and sync it into backend/flutter_web
+./build_web.sh
+
+# Now open http://localhost:8000/
+# (Django serves the whole attendance app - login, dashboards, admin console)
+```
+
+The `backend/flutter_web/` directory is gitignored, so every clone must run
+`./build_web.sh` once before the app is served.
+
+#### 3.2 Install Flutter dependencies
 
 ```bash
 cd frontend/attendance_app
-```
-
-#### 3.2 Install Dependencies
-
-```bash
 flutter pub get
 ```
 
-#### 3.3 Run Flutter App
+#### 3.3 Run in dev mode (hot reload)
 
 ```bash
-# Web Browser
+# Web Browser (talks to the backend at http://localhost:8000/api/v1)
 flutter run -d chrome
 
 # Android Emulator
@@ -173,6 +185,65 @@ flutter run -d android
 # iOS Simulator (Mac only)
 flutter run -d ios
 ```
+
+> CORS is already configured (`CORS_ALLOW_ALL_ORIGINS=True` in `.env.example`)
+> so `flutter run -d chrome` works out of the box.
+
+---
+
+##  Run Without Docker (SQLite, fast start)
+
+Don't want Docker? The backend defaults to **SQLite** when `DATABASE_URL` is
+not set, so you can run everything locally with just Python + Flutter.
+
+```bash
+cd backend
+
+# 1. Create and activate a virtual environment
+python -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+
+# 2. Install dependencies
+pip install -r requirements.txt
+
+# 3. Configure the environment
+cp .env.example .env
+# Optional: comment out / clear DATABASE_URL to use the SQLite default,
+# otherwise point it at your own PostgreSQL.
+# SECRET_KEY can stay as-is for local dev.
+
+# 4. Prepare the database
+python manage.py migrate
+
+# 5. (Optional) Load demo users and classes
+python manage.py seed
+
+# 6. Run the backend (serves the app + API on http://localhost:8000)
+python manage.py runserver 0.0.0.0:8000
+```
+
+Then build the web frontend once (from the repo root):
+
+```bash
+./build_web.sh
+```
+
+Open **http://localhost:8000/** in a browser.
+
+##  Demo Accounts
+
+After running `python manage.py seed`, these accounts exist (password is
+`password123` for all):
+
+| Role    | Email                       | Username       | Notes                    |
+|---------|-----------------------------|----------------|--------------------------|
+| Admin   | `admin@example.com`         | `seed_admin`   | Django staff/superuser   |
+| Teacher | `teacher@example.com`       | `mr_teacher`   | Class teacher            |
+| Teacher | `prof_davis@example.com`    | `prof_davis`   | Class teacher            |
+| Student | `student@example.com`       | `john_student` | Enrolled student         |
+
+> Log in as **Admin** (`admin@example.com` / `password123`) to open the admin
+> console, or a teacher account for the teacher dashboard.
 
 ---
 

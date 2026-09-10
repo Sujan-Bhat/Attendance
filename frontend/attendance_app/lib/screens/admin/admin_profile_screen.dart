@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../services/profile_service.dart';
 import '../../services/class_service.dart';
+import '../../widgets/admin_web_layout.dart';
 
 class AdminProfileScreen extends StatefulWidget {
   const AdminProfileScreen({super.key});
@@ -95,36 +96,42 @@ class _AdminProfileScreenState extends State<AdminProfileScreen>
     final isMobile = screenW < 600;
     final isDesktop = screenW >= 1024;
 
-    return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(color: Color(0xFF0288A3)),
-        child: SafeArea(
-          child: Column(
-            children: [
-              _buildTopBar(isMobile),
-              Expanded(
-                child: isLoading
-                    ? const Center(
-                        child: CircularProgressIndicator(color: Colors.white),
-                      )
-                    : SingleChildScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        child: Padding(
-                          padding: EdgeInsets.all(isMobile ? 16 : 40),
-                          child: isDesktop
-                              ? _buildDesktopContent()
-                              : _buildMobileContent(isMobile),
-                        ),
+    return AdminWebLayout(
+      currentRoute: 'Profile',
+      mobileChild: _buildProfileBody(isMobile, isDesktop),
+      desktopBody: _buildProfileBody(isMobile, isDesktop),
+    );
+  }
+
+  Widget _buildProfileBody(bool isMobile, bool isDesktop) {
+    return Container(
+      decoration: const BoxDecoration(color: Color(0xFF0288A3)),
+      child: SafeArea(
+        child: Column(
+          children: [
+            _buildTopBar(isMobile, isDesktop),
+            Expanded(
+              child: isLoading
+                  ? const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    )
+                  : SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
+                      child: Padding(
+                        padding: EdgeInsets.all(isMobile ? 16 : 40),
+                        child: isDesktop
+                            ? _buildDesktopContent()
+                            : _buildMobileContent(isMobile),
                       ),
-              ),
-            ],
-          ),
+                    ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildTopBar(bool isMobile) {
+  Widget _buildTopBar(bool isMobile, bool isDesktop) {
     return Padding(
       padding: EdgeInsets.fromLTRB(isMobile ? 4 : 16, 8, isMobile ? 4 : 16, 0),
       child: Row(

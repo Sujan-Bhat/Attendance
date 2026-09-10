@@ -48,10 +48,16 @@ from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.static import serve as static_serve
 from django.urls import re_path
 
+from attendance.admin_bulk_views import (
+    admin_bulk_validate_students,
+    admin_bulk_validate_rows,
+    admin_bulk_create_students,
+)
 from attendance.admin_views import (
     admin_classes_summary,
     admin_semester_classes,
     admin_semester_students,
+    admin_unassigned_students,
     admin_teachers_list,
     admin_update_teacher,
     admin_stats,
@@ -63,6 +69,8 @@ from attendance.admin_views import (
     admin_class_detail,
     admin_remove_student_from_class,
     admin_update_student,
+    admin_delete_student,
+    admin_delete_all_students,
 )
 
 FLUTTER_WEB_DIR = os.path.join(settings.BASE_DIR, 'flutter_web')
@@ -70,8 +78,17 @@ FLUTTER_WEB_DIR = os.path.join(settings.BASE_DIR, 'flutter_web')
 def serve_flutter(request, path=''):
     file_path = os.path.join(FLUTTER_WEB_DIR, path)
     if path and os.path.exists(file_path) and os.path.isfile(file_path):
-        return static_serve(request, path, document_root=FLUTTER_WEB_DIR)
-    return static_serve(request, 'index.html', document_root=FLUTTER_WEB_DIR)
+        response = static_serve(request, path, document_root=FLUTTER_WEB_DIR)
+    else:
+        path = 'index.html'
+        response = static_serve(request, path, document_root=FLUTTER_WEB_DIR)
+    # Flutter's web assets (main.dart.js, flutter_bootstrap.js, index.html, and
+    # the files under /assets/ and /canvaskit/) are requested at stable URLs
+    # that do NOT change between builds. Force the browser to always revalidate
+    # against the server so every build is picked up immediately without manual
+    # cache clearing (an earlier stale-cache bug kept showing an old build).
+    response['Cache-Control'] = 'no-cache'
+    return response
 
 urlpatterns = [
     path('.well-known/assetlinks.json', assetlinks_json, name='assetlinks'),
@@ -138,6 +155,10 @@ urlpatterns = [
     path('api/v1/admin/classes/summary/', admin_classes_summary, name='admin_classes_summary'),
     path('api/v1/admin/classes/by-semester/<str:semester>/', admin_semester_classes, name='admin_semester_classes'),
     path('api/v1/admin/students/by-semester/<str:semester>/', admin_semester_students, name='admin_semester_students'),
+    path('api/v1/admin/students/unassigned/', admin_unassigned_students, name='admin_unassigned_students'),
+    path('api/v1/admin/students/bulk/validate/', admin_bulk_validate_students, name='admin_bulk_validate_students'),
+    path('api/v1/admin/students/bulk/validate-rows/', admin_bulk_validate_rows, name='admin_bulk_validate_rows'),
+    path('api/v1/admin/students/bulk/create/', admin_bulk_create_students, name='admin_bulk_create_students'),
     path('api/v1/admin/teachers/', admin_teachers_list, name='admin_teachers_list'),
     path('api/v1/admin/stats/', admin_stats, name='admin_stats'),
     path('api/v1/admin/users/create/', admin_create_user, name='admin_create_user'),
@@ -145,6 +166,8 @@ urlpatterns = [
     path('api/v1/admin/users/<int:user_id>/toggle-access/', admin_toggle_user_access, name='admin_toggle_user_access'),
     path('api/v1/admin/users/<int:user_id>/delete/', admin_delete_user, name='admin_delete_user'),
     path('api/v1/admin/students/<int:student_id>/update/', admin_update_student, name='admin_update_student'),
+    path('api/v1/admin/students/<int:student_id>/delete/', admin_delete_student, name='admin_delete_student'),
+    path('api/v1/admin/students/delete-all/<str:semester>/', admin_delete_all_students, name='admin_delete_all_students'),
     path('api/v1/admin/teachers/<int:teacher_id>/update/', admin_update_teacher, name='admin_update_teacher'),
     path('api/v1/admin/classes/<int:class_id>/update/', admin_update_class, name='admin_update_class'),
     path('api/v1/admin/classes/<int:class_id>/detail/', admin_class_detail, name='admin_class_detail'),

@@ -15,21 +15,54 @@ class AddStudentsScreen extends StatefulWidget {
 class _AddStudentsScreenState extends State<AddStudentsScreen> {
   final ClassService _classService = ClassService();
 
-  final nameController = TextEditingController();
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
-
   List<Map<String, String>> students = [];
-  bool _obscurePassword = true;
   bool isLoading = false;
-  bool isCheckingEmail = false;
-  bool isExistingStudent = false;
   String? classCode;
+
+  List<Map<String, dynamic>> _enrolledStudents = [];
+  List<Map<String, dynamic>> _availableStudents = [];
+  final Set<String> _enrolledEmails = {};
+  final searchController = TextEditingController();
+  bool _rosterLoading = true;
+  String? _semester;
 
   @override
   void initState() {
     super.initState();
     _fetchClassDetails();
+    _fetchRoster();
+  }
+
+  Future<void> _fetchRoster() async {
+    try {
+      final roster = await _classService.getClassRoster(widget.classId);
+      if (roster != null && mounted) {
+        setState(() {
+          _semester = roster['semester'] as String?;
+          _enrolledStudents = List<Map<String, dynamic>>.from(
+            roster['students'] ?? const [],
+          );
+          _availableStudents = List<Map<String, dynamic>>.from(
+            roster['available_students'] ?? const [],
+          );
+          _enrolledEmails
+            ..clear()
+            ..addAll(
+              _enrolledStudents
+                  .map((s) => (s['email'] as String? ?? '').toLowerCase())
+                  .where((e) => e.isNotEmpty),
+            );
+          _rosterLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error fetching roster: $e');
+      if (mounted) {
+        setState(() {
+          _rosterLoading = false;
+        });
+      }
+    }
   }
 
   Future<void> _fetchClassDetails() async {
@@ -47,109 +80,8 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
 
   @override
   void dispose() {
-    nameController.dispose();
-    emailController.dispose();
-    passwordController.dispose();
+    searchController.dispose();
     super.dispose();
-  }
-
-  Future<void> _checkEmailAndAutoFill(String email) async {
-    if (email.isEmpty || !_isValidEmail(email)) {
-      setState(() {
-        isExistingStudent = false;
-      });
-      return;
-    }
-
-    setState(() {
-      isCheckingEmail = true;
-    });
-
-    try {
-      final studentData = await _classService.checkStudentByEmail(email);
-
-      if (studentData != null && mounted) {
-        setState(() {
-          isExistingStudent = true;
-          nameController.text = studentData['username'] ?? '';
-          passwordController.clear();
-        });
-
-        _showInfoSnackBar('✓ Existing student found! Details auto-filled.');
-      } else if (mounted) {
-        setState(() {
-          isExistingStudent = false;
-          nameController.clear();
-        });
-      }
-    } catch (e) {
-      print('Error checking email: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          isCheckingEmail = false;
-        });
-      }
-    }
-  }
-
-  bool _isValidEmail(String email) {
-    return RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(email);
-  }
-
-  void _addStudent() {
-    if (emailController.text.isEmpty) {
-      _showErrorSnackBar('Email is required');
-      return;
-    }
-
-    if (!_isValidEmail(emailController.text)) {
-      _showErrorSnackBar('Please enter a valid email');
-      return;
-    }
-
-    if (!isExistingStudent) {
-      if (nameController.text.isEmpty) {
-        _showErrorSnackBar('Name is required for new students');
-        return;
-      }
-      if (passwordController.text.isEmpty) {
-        _showErrorSnackBar('Password is required for new students');
-        return;
-      }
-      if (passwordController.text.length < 6) {
-        _showErrorSnackBar('Password must be at least 6 characters');
-        return;
-      }
-    }
-
-    // Check for duplicate email in list
-    if (students.any((s) => s['email'] == emailController.text)) {
-      _showErrorSnackBar('Student with this email already in list');
-      return;
-    }
-
-    // Build student data
-    final studentData = <String, String>{'email': emailController.text};
-
-    if (nameController.text.isNotEmpty) {
-      studentData['name'] = nameController.text;
-    }
-    if (passwordController.text.isNotEmpty) {
-      studentData['password'] = passwordController.text;
-    }
-
-    setState(() {
-      students.add(studentData);
-      isExistingStudent = false;
-    });
-
-    // Clear fields
-    nameController.clear();
-    emailController.clear();
-    passwordController.clear();
-
-    _showSuccessSnackBar('✓ Student added to list!');
   }
 
   void _removeStudent(int index) {
@@ -157,6 +89,24 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
       students.removeAt(index);
     });
     _showInfoSnackBar('Student removed from list');
+  }
+
+  void _addAvailableStudent(Map<String, dynamic> student) {
+    final email = (student['email'] as String? ?? '').trim().toLowerCase();
+    if (email.isEmpty) return;
+    if (_enrolledEmails.contains(email)) {
+      _showErrorSnackBar('This student is already enrolled in this class.');
+      return;
+    }
+    if (students.any((s) => s['email'] == email)) {
+      _showErrorSnackBar('Student with this email already in list');
+      return;
+    }
+    final name = student['username'] as String? ?? email;
+    setState(() {
+      students.add({'email': email, 'name': name});
+    });
+    _showSuccessSnackBar('✓ $name added to list!');
   }
 
   Future<void> _submitStudents() async {
@@ -171,36 +121,44 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
 
     int successCount = 0;
     int failCount = 0;
-    List<String> errors = [];
+    final failedEmails = <String>{};
+    final errors = <String>[];
 
     try {
       for (var student in students) {
-        try {
-          await _classService.addStudentToClass(widget.classId, student);
+        final result =
+            await _classService.addStudentToClass(widget.classId, student);
+        if (result['success'] == true) {
           successCount++;
-        } catch (e) {
+        } else {
           failCount++;
-          errors.add('${student['email']}: ${e.toString()}');
+          final email = student['email'] ?? '';
+          failedEmails.add(email);
+          errors.add(
+            '$email: ${result['message'] ?? 'Failed to add student'}',
+          );
         }
       }
 
-      if (mounted) {
-        if (failCount == 0) {
-          _showSuccessSnackBar(
-            '✓ All $successCount students added successfully!',
-          );
-          Navigator.pop(context, true);
-        } else {
-          _showErrorSnackBar(
-            '$successCount added, $failCount failed.\n${errors.join('\n')}',
-          );
-          // Remove successfully added students
-          setState(() {
-            students = students.where((s) {
-              return errors.any((e) => e.contains(s['email']!));
-            }).toList();
-          });
-        }
+      if (!mounted) return;
+
+      if (failCount == 0) {
+        _showSuccessSnackBar(
+          '✓ All $successCount students added successfully!',
+        );
+        // Keep the screen open so the next batch can be added immediately.
+        setState(() {
+          students.clear();
+        });
+        // Refresh roster so enrolled grows and available shrinks.
+        _fetchRoster();
+      } else {
+        // Keep only the students that failed so they can be retried.
+        setState(() {
+          students =
+              students.where((s) => failedEmails.contains(s['email'])).toList();
+        });
+        _showEnrollErrors(successCount, failCount, errors);
       }
     } catch (e) {
       _showErrorSnackBar('Failed to add students: $e');
@@ -211,6 +169,53 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
         });
       }
     }
+  }
+
+  void _showEnrollErrors(
+    int successCount,
+    int failCount,
+    List<String> errors,
+  ) {
+    _showErrorSnackBar('$successCount added, $failCount failed.');
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('$failCount student${failCount == 1 ? '' : 's'} failed'),
+        content: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (successCount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    '$successCount added successfully.',
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              for (final error in errors)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Text(
+                    error,
+                    style: const TextStyle(
+                      color: Colors.red,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('OK'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showSuccessSnackBar(String message) {
@@ -304,6 +309,8 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
           height: 650, // Fixed height for tabs
           child: _buildLeftPanel(true),
         ),
+        const SizedBox(height: 24),
+        _buildAvailableSection(),
         if (students.isNotEmpty) ...[
           const SizedBox(height: 24),
           _buildStudentsList(),
@@ -332,21 +339,29 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
 
           const SizedBox(width: 20),
 
-          // RIGHT SIDE - Students List
+          // RIGHT SIDE - Students List + Roster
           Expanded(
             flex: 3,
-            child: students.isEmpty
-                ? _buildEmptyStudentsList()
-                : Column(
-                    children: [
-                      Expanded(
-                        child: SingleChildScrollView(
-                          child: _buildStudentsList(),
-                        ),
-                      ),
-                      if (students.isNotEmpty) _buildSubmitButton(),
-                    ],
+            child: Column(
+              children: [
+                Expanded(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _buildAvailableSection(),
+                        const SizedBox(height: 16),
+                        if (students.isEmpty)
+                          _buildEmptyStudentsList()
+                        else
+                          _buildStudentsList(),
+                      ],
+                    ),
                   ),
+                ),
+                if (students.isNotEmpty) _buildSubmitButton(),
+              ],
+            ),
           ),
         ],
       ),
@@ -511,13 +526,16 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
                 indicatorWeight: 3,
                 tabs: [
                   Tab(icon: Icon(Icons.link_rounded), text: 'Invite Link'),
-                  Tab(icon: Icon(Icons.person_add_rounded), text: 'Manual Add'),
+                  Tab(
+                    icon: Icon(Icons.group_rounded),
+                    text: 'Enrolled Students',
+                  ),
                 ],
               ),
             ),
             Expanded(
               child: TabBarView(
-                children: [_buildShareLinkTab(), _buildManualAddTab()],
+                children: [_buildShareLinkTab(), _buildEnrolledTab()],
               ),
             ),
           ],
@@ -629,7 +647,7 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
     );
   }
 
-  Widget _buildManualAddTab() {
+  Widget _buildEnrolledTab() {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(20),
       child: Column(
@@ -637,10 +655,10 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
         children: [
           const Row(
             children: [
-              Icon(Icons.person_add_rounded, color: Color(0xFF007C91)),
+              Icon(Icons.group_rounded, color: Color(0xFF007C91)),
               SizedBox(width: 8),
               Text(
-                'Student Information',
+                'Enrolled Students',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -651,239 +669,242 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
           ),
           const SizedBox(height: 16),
 
-          // Helper text
-          Container(
-            padding: const EdgeInsets.all(12),
-            decoration: BoxDecoration(
-              color: Colors.blue.shade50,
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.blue.shade200),
-            ),
-            child: Row(
-              children: [
-                Icon(Icons.info_outline, color: Colors.blue.shade700, size: 20),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    'Enter email to check if student exists. Details will auto-fill for existing students.',
-                    style: TextStyle(fontSize: 12, color: Colors.blue.shade700),
-                  ),
+          if (_rosterLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 40),
+              child: Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF007C91)),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-
-          // Email field with auto-check
-          _buildTextField(
-            controller: emailController,
-            label: 'Email Address *',
-            hint: 'student@example.com',
-            icon: Icons.email_rounded,
-            keyboardType: TextInputType.emailAddress,
-            onChanged: (value) {
-              // Debounce: Check email after user stops typing
-              Future.delayed(const Duration(milliseconds: 800), () {
-                if (emailController.text == value && value.isNotEmpty) {
-                  _checkEmailAndAutoFill(value);
-                }
-              });
-            },
-            suffixIcon: isCheckingEmail
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: Padding(
-                      padding: EdgeInsets.all(12.0),
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(
-                          Color(0xFF007C91),
+              ),
+            )
+          else if (_enrolledStudents.isEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.grey, size: 20),
+                  SizedBox(width: 10),
+                  Text(
+                    'No students enrolled yet.',
+                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                  ),
+                ],
+              ),
+            )
+          else
+            Column(
+              children: [
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 8,
+                  ),
+                  margin: const EdgeInsets.only(bottom: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF007C91).withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.check_circle_outline_rounded,
+                        color: Color(0xFF007C91),
+                        size: 18,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '${_enrolledStudents.length} student'
+                        '${_enrolledStudents.length == 1 ? '' : 's'} enrolled',
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                          color: Color(0xFF007C91),
                         ),
                       ),
-                    ),
-                  )
-                : (isExistingStudent
-                      ? Icon(
-                          Icons.check_circle,
-                          color: Colors.green.shade600,
-                          size: 24,
-                        )
-                      : null),
-          ),
-
-          const SizedBox(height: 16),
-
-          // Status badge
-          if (isExistingStudent)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.green.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.green.shade300, width: 1.5),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.check_circle_outline,
-                    color: Colors.green.shade700,
-                    size: 20,
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Text(
-                    '✓ Existing student found',
-                    style: TextStyle(
-                      color: Colors.green.shade800,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          if (!isExistingStudent &&
-              emailController.text.isNotEmpty &&
-              _isValidEmail(emailController.text) &&
-              !isCheckingEmail)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              decoration: BoxDecoration(
-                color: Colors.orange.shade50,
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.orange.shade300, width: 1.5),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    Icons.person_add_outlined,
-                    color: Colors.orange.shade700,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    'New student - fill all required fields',
-                    style: TextStyle(
-                      color: Colors.orange.shade800,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 14,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-          const SizedBox(height: 20),
-
-          // Other fields
-          _buildTextField(
-            controller: nameController,
-            label: isExistingStudent ? 'Student Name' : 'Student Name *',
-            hint: 'John Doe',
-            icon: Icons.person_rounded,
-            enabled: !isExistingStudent,
-          ),
-          const SizedBox(height: 16),
-          _buildTextField(
-            controller: passwordController,
-            label: isExistingStudent ? 'Password (Optional)' : 'Password *',
-            hint: isExistingStudent
-                ? 'Leave empty for existing'
-                : 'Min. 6 characters',
-            icon: Icons.lock_rounded,
-            obscureText: _obscurePassword,
-            suffixIcon: IconButton(
-              icon: Icon(
-                _obscurePassword
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-                color: const Color(0xFF007C91),
-              ),
-              onPressed: () {
-                setState(() {
-                  _obscurePassword = !_obscurePassword;
-                });
-              },
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Add button
-          SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: _addStudent,
-              icon: const Icon(Icons.add_rounded, size: 22),
-              label: const Text(
-                'Add to List',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-              ),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF007C91),
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 16),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
                 ),
-                elevation: 2,
-              ),
+                ..._enrolledStudents.map(_buildEnrolledStudentRow).toList(),
+              ],
             ),
-          ),
         ],
       ),
     );
   }
 
-  Widget _buildTextField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required IconData icon,
-    bool obscureText = false,
-    TextInputType keyboardType = TextInputType.text,
-    Widget? suffixIcon,
-    Function(String)? onChanged,
-    bool enabled = true,
-  }) {
-    return TextField(
-      controller: controller,
-      obscureText: obscureText,
-      keyboardType: keyboardType,
-      enabled: enabled,
-      onChanged: onChanged,
-      style: TextStyle(
-        color: enabled ? Colors.black87 : Colors.grey.shade600,
-        fontSize: 15,
+  Widget _buildAvailableSection() {
+    if (_rosterLoading) {
+      return Container(
+        padding: const EdgeInsets.all(32),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(20),
+        ),
+        child: const Center(
+          child: CircularProgressIndicator(
+            strokeWidth: 2.5,
+            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF007C91)),
+          ),
+        ),
+      );
+    }
+
+    final query = searchController.text.trim().toLowerCase();
+    final available = query.isEmpty
+        ? _availableStudents
+        : _availableStudents
+              .where((s) =>
+                  (s['username'] as String? ?? '')
+                      .toLowerCase()
+                      .contains(query) ||
+                  (s['email'] as String? ?? '')
+                      .toLowerCase()
+                      .contains(query))
+              .toList();
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      decoration: BoxDecoration(
+        color: Colors.grey.shade50,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade300),
       ),
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        hintStyle: TextStyle(color: Colors.grey.shade400),
-        prefixIcon: Icon(icon, color: const Color(0xFF007C91), size: 22),
-        suffixIcon: suffixIcon,
-        filled: true,
-        fillColor: enabled ? Colors.grey.shade50 : Colors.grey.shade100,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFF007C91), width: 2),
-        ),
-        disabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.grey.shade300),
-        ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.person_add_alt_1_rounded,
+                  color: Color(0xFF007C91),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Available this Semester (${available.length})',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                      color: Color(0xFF007C91),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+            child: TextField(
+              controller: searchController,
+              onChanged: (_) => setState(() {}),
+              decoration: InputDecoration(
+                hintText: 'Search by name or email...',
+                prefixIcon: const Icon(Icons.search_rounded, size: 20),
+                isDense: true,
+                filled: true,
+                fillColor: Colors.white,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(10),
+                  borderSide: BorderSide(color: Colors.grey.shade300),
+                ),
+              ),
+            ),
+          ),
+          if (available.isEmpty)
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Text(
+                'No available students for this semester'
+                '${_semester != null ? ' ($_semester)' : ''}.',
+                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              ),
+            )
+          else
+            ...available.map(_buildAvailableStudentTile).toList(),
+        ],
       ),
     );
+  }
+
+  Widget _buildAvailableStudentTile(Map<String, dynamic> student) {
+    final name = student['username'] as String? ?? 'Student';
+    final email = student['email'] as String? ?? '';
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      leading: CircleAvatar(
+        backgroundColor: const Color(0xFF007C91),
+        radius: 16,
+        child: Text(
+          _initialOf(name) ?? 'S',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      title: Text(
+        name,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        email,
+        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+      ),
+      trailing: IconButton(
+        icon: const Icon(
+          Icons.add_circle_rounded,
+          color: Color(0xFF007C91),
+        ),
+        tooltip: 'Add to list',
+        onPressed: () => _addAvailableStudent(student),
+      ),
+    );
+  }
+
+  Widget _buildEnrolledStudentRow(Map<String, dynamic> student) {
+    final name = student['username'] as String? ?? 'Student';
+    final email = student['email'] as String? ?? '';
+    return ListTile(
+      dense: true,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      leading: CircleAvatar(
+        backgroundColor: Colors.green.shade600,
+        radius: 16,
+        child: Text(
+          _initialOf(name) ?? 'S',
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+          ),
+        ),
+      ),
+      title: Text(
+        name,
+        style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+      ),
+      subtitle: Text(
+        email,
+        style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+      ),
+    );
+  }
+
+  String? _initialOf(String? value) {
+    if (value == null || value.isEmpty) return null;
+    return value.substring(0, 1).toUpperCase();
   }
 
   Widget _buildStudentsList() {
@@ -975,6 +996,10 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
               final hasPassword =
                   student.containsKey('password') &&
                   student['password']!.isNotEmpty;
+              final initial =
+                  _initialOf(student['name']) ??
+                  _initialOf(student['email']) ??
+                  'S';
 
               return Container(
                 decoration: BoxDecoration(
@@ -991,9 +1016,7 @@ class _AddStudentsScreenState extends State<AddStudentsScreen> {
                     backgroundColor: const Color(0xFF007C91),
                     radius: 24,
                     child: Text(
-                      student['name']?.substring(0, 1).toUpperCase() ??
-                          student['email']?.substring(0, 1).toUpperCase() ??
-                          'S',
+                      initial,
                       style: const TextStyle(
                         color: Colors.white,
                         fontWeight: FontWeight.bold,
