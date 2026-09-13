@@ -35,7 +35,7 @@ DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 #     for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 #     if host.strip()
 # ]
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0']#remove this
+ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.0.13']#remove this
 AUTH_USER_MODEL = 'attendance.User'
 
 #ADD THESE LINES (Optional - for documentation)
@@ -172,7 +172,6 @@ CORS_ALLOWED_ORIGINS = [
 ]
 
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True").lower() == "true"
-# CORS_ALLOW_ALL_ORIGINS = True
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")

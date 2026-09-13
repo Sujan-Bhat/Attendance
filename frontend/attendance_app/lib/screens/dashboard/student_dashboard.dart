@@ -13,6 +13,8 @@ import '../student/pattern_sessions_screen.dart';
 import '../../services/class_service.dart';
 import '../../services/storage_service.dart';
 import '../../widgets/offline_indicator.dart';
+import '../../services/face_auth_service.dart';
+import '../student/face_verification_screen.dart';
 
 class StudentDashboardPage extends StatefulWidget {
   const StudentDashboardPage({super.key});
@@ -223,12 +225,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         break;
 
       case 'Scan QR':
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (context) => const QRScannerScreen()),
-        ).then((_) {
-          _loadUserData(forceRefresh: true);
-        });
+        _handleScanQR();
         break;
 
       case 'Attendance History':
@@ -260,6 +257,43 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         ScaffoldMessenger.of(
           context,
         ).showSnackBar(SnackBar(content: Text('$title - Coming soon!')));
+    }
+  }
+
+  Future<void> _handleScanQR() async {
+    final faceAuth = FaceAuthService();
+    bool hasSavedFace = await faceAuth.hasSavedFace();
+
+    if (!mounted) return;
+
+    // Launch Face Verification or Registration based on saved face
+    final result = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => FaceVerificationScreen(isRegistration: !hasSavedFace),
+      ),
+    );
+
+    if (result == true && mounted) {
+      // If they just registered, they are effectively verified for this session.
+      // If they were already registered, they just passed verification.
+      // In either case, proceed directly to the QR scanner.
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (context) => const QRScannerScreen()),
+      ).then((_) {
+        _loadUserData(forceRefresh: true);
+      });
+    } else {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(!hasSavedFace 
+                ? 'Face Registration cancelled or failed.' 
+                : 'Face Verification failed.'),
+          ),
+        );
+      }
     }
   }
 

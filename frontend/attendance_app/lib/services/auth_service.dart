@@ -16,6 +16,7 @@ class AuthService {
       final response = await _dio.post(
         '/auth/token/',
         data: {'email': email, 'password': password},
+        options: Options(headers: ApiConfig.headers),
       );
 
       if (response.statusCode == 200) {

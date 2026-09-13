@@ -260,6 +260,7 @@ class CreateSessionSerializer(serializers.Serializer):
     duration_minutes = serializers.IntegerField(min_value=1, max_value=300)
     class_type = serializers.ChoiceField(choices=['qr', 'pattern'], default='qr')
     start_time = serializers.DateTimeField(required=False, allow_null=True)
+    rotation_interval = serializers.IntegerField(min_value=5, max_value=300, default=10, required=False)
 
     
     def validate_class_id(self, value):
@@ -287,7 +288,7 @@ class SessionSerializer(serializers.ModelSerializer):
             'id', 'session_id', 'class_code', 'class_name', 'semester',
             'teacher_name', 'start_time', 'end_time',
             'duration_minutes', 'status', 'is_active', 'qr_data', 'created_at',
-            'class_type', 'pattern_code', 'instruction_card', 'shape_data'
+                        'class_type', 'pattern_code', 'instruction_card', 'shape_data', 'rotation_interval', 'totp_secret',
         ]
     
     def get_qr_data(self, obj):

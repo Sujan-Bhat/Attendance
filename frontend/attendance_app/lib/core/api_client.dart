@@ -28,7 +28,7 @@ class ApiClient {
           if (token != null && token.isNotEmpty) {
             options.headers['Authorization'] = 'Bearer $token';
           }
-          options.headers['Bypass-Tunnel-Reminder'] = 'true';
+          // options.headers['Bypass-Tunnel-Reminder'] = 'true'; change this
           return handler.next(options);
         },
         onError: (DioException error, handler) async {

@@ -1,7 +1,9 @@
 import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
+import 'package:crypto/crypto.dart';
 import '../../services/session_service.dart';
 import '../common/custom_camera_screen.dart';
 import '../../widgets/pattern_painter.dart';
@@ -37,6 +39,11 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
   bool isUploadingReference = false;
   String? referenceImagePath;
 
+  String currentQrData = '';
+  String currentCaptcha = '';
+  double rotationProgress = 0.0;
+  Timer? _totpTimer;
+
   static const _channel = MethodChannel('attendance_app/camera');
   StreamSubscription? _syncSubscription;
   StreamSubscription? _connectivitySubscription;
@@ -45,6 +52,7 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
   void initState() {
     super.initState();
     _initializeSession();
+    _startTotpCalculation();
     _startAutoRefresh();
     
     // Start BLE Broadcasting for this session
@@ -78,6 +86,7 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     _connectivitySubscription?.cancel();
     _countdownTimer?.cancel();
     _refreshTimer?.cancel();
+    _totpTimer?.cancel();
     super.dispose();
   }
 
@@ -142,6 +151,75 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     _refreshTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
       _fetchAttendanceData(showLoading: false);
     });
+  }
+
+  void _startTotpCalculation() {
+    final sessionType = widget.sessionData['class_type'] ?? 'qr';
+    if (sessionType != 'qr') {
+      currentQrData = widget.qrCodeData;
+      return;
+    }
+
+    final sessionId = widget.sessionData['session_id'].toString();
+    final totpSecret = widget.sessionData['totp_secret']?.toString() ?? '';
+    final rotationInterval = widget.sessionData['rotation_interval'] as int? ?? 10;
+
+    _updateTotpAndCaptcha(sessionId, totpSecret, rotationInterval);
+
+    _totpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (mounted) {
+        _updateTotpAndCaptcha(sessionId, totpSecret, rotationInterval);
+      }
+    });
+  }
+
+  void _updateTotpAndCaptcha(String sessionId, String totpSecret, int rotationInterval) {
+    final startStr = widget.sessionData['start_time'];
+    final startTime = startStr != null ? DateTime.parse(startStr).toLocal() : DateTime.now();
+    final int startTimestamp = startTime.millisecondsSinceEpoch ~/ 1000;
+    final int timestamp = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+    
+    // Ensure elapsed is at least 0
+    final int elapsed = (timestamp - startTimestamp) >= 0 ? (timestamp - startTimestamp) : 0;
+    final int window = elapsed ~/ rotationInterval;
+    
+    // Progress calculation
+    final int secondsInWindow = elapsed % rotationInterval;
+    rotationProgress = (rotationInterval - secondsInWindow) / rotationInterval;
+
+    // Token
+    final tokenInput = "$sessionId-$totpSecret-$window";
+    final tokenBytes = utf8.encode(tokenInput);
+    final tokenHash = sha256.convert(tokenBytes).toString();
+    final token = tokenHash.substring(0, 16);
+
+    // Captcha
+    final captchaInput = "$sessionId-$totpSecret-$window-captcha";
+    final captchaBytes = utf8.encode(captchaInput);
+    final captchaHash = sha256.convert(captchaBytes).toString();
+    
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    int num = int.parse(captchaHash.substring(0, 8), radix: 16);
+    String captcha = "";
+    for (int i = 0; i < 4; i++) {
+      captcha += chars[num % chars.length];
+      num = num ~/ chars.length;
+    }
+
+    final newQrData = jsonEncode({
+      'session_id': sessionId,
+      'token': token,
+    });
+
+    if (newQrData != currentQrData || captcha != currentCaptcha) {
+      setState(() {
+        currentQrData = newQrData;
+        currentCaptcha = captcha;
+      });
+    } else {
+      // Just update progress bar
+      setState(() {});
+    }
   }
 
   Future<void> _fetchAttendanceData({bool showLoading = true}) async {
@@ -927,21 +1005,73 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
             ),
           ] else ...[
             QrImageView(
-              data: widget.qrCodeData,
+              data: currentQrData.isNotEmpty ? currentQrData : widget.qrCodeData,
               version: QrVersions.auto,
               size: size,
               backgroundColor: Colors.white,
               foregroundColor: const Color(0xFF00838f),
             ),
-            const SizedBox(height: 16),
-            const Text(
-              "Scan to Mark Attendance",
-              style: TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                color: Color(0xFF1F2937),
+            if (widget.sessionData['class_type'] == 'qr') ...[
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                decoration: BoxDecoration(
+                  color: Colors.redAccent.shade100.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.redAccent, width: 2),
+                ),
+                child: Column(
+                  children: [
+                    const Text(
+                      'CAPTCHA CODE',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent, letterSpacing: 1.5),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      currentCaptcha,
+                      style: const TextStyle(
+                        fontSize: 32,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 6,
+                        color: Colors.redAccent,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
+              const SizedBox(height: 16),
+              SizedBox(
+                width: size * 0.8,
+                child: Column(
+                  children: [
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(4),
+                      child: LinearProgressIndicator(
+                        value: rotationProgress,
+                        backgroundColor: Colors.grey[200],
+                        valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF00838f)),
+                        minHeight: 6,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Rotating QR code...',
+                      style: TextStyle(fontSize: 11, color: Colors.grey[600], fontStyle: FontStyle.italic),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              const SizedBox(height: 16),
+              const Text(
+                "Scan to Mark Attendance",
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF1F2937),
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 8),
           Text(

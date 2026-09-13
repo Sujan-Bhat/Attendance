@@ -18,18 +18,32 @@ class AttendanceService {
   }
 
   /// Mark attendance by scanning QR code
-  Future<Map<String, dynamic>> markAttendance(String sessionId, {bool isOfflineSync = false, String? timestamp, int? bleHopCount, int? bleRssi}) async {
+  Future<Map<String, dynamic>> markAttendance(
+    String sessionId, {
+    String? qrToken,
+    String? captcha,
+    bool isOfflineSync = false,
+    String? timestamp,
+    int? bleHopCount,
+    int? bleRssi,
+  }) async {
     try {
       final token = await _getToken();
-      
+
       final data = <String, dynamic>{};
+      if (qrToken != null) {
+        data['token'] = qrToken;
+      }
+      if (captcha != null) {
+        data['captcha'] = captcha;
+      }
       if (isOfflineSync) {
         data['is_offline_sync'] = true;
         if (timestamp != null) {
           data['timestamp'] = timestamp;
         }
       }
-      
+
       if (bleHopCount != null) {
         data['ble_hop_count'] = bleHopCount;
       }

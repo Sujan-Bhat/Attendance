@@ -2,6 +2,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import '../../services/profile_service.dart';
 import '../../services/auth_service.dart';
+import 'face_verification_screen.dart';
 import '../../widgets/student_drawer.dart';
 import '../../widgets/magical_profile_widgets.dart';
 
@@ -41,7 +42,10 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
       vsync: this,
       duration: const Duration(milliseconds: 1000),
     );
-    _fadeIn = CurvedAnimation(parent: _fadeController, curve: Curves.easeOutCubic);
+    _fadeIn = CurvedAnimation(
+      parent: _fadeController,
+      curve: Curves.easeOutCubic,
+    );
     _fadeController.forward();
   }
 
@@ -85,15 +89,24 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1E293B),
         title: const Text('Logout', style: TextStyle(color: Colors.white)),
-        content: const Text('Are you sure you want to logout?', style: TextStyle(color: Colors.white70)),
+        content: const Text(
+          'Are you sure you want to logout?',
+          style: TextStyle(color: Colors.white70),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: const Text(
+              'Cancel',
+              style: TextStyle(color: Colors.white54),
+            ),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Logout', style: TextStyle(color: Colors.redAccent)),
+            child: const Text(
+              'Logout',
+              style: TextStyle(color: Colors.redAccent),
+            ),
           ),
         ],
       ),
@@ -153,7 +166,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
       body: Stack(
         children: [
           const Positioned.fill(child: MagicalBackground()),
-          
+
           SafeArea(
             child: isLoading
                 ? const Center(
@@ -161,22 +174,27 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                   )
                 : SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
-                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 20,
+                    ),
                     child: FadeTransition(
                       opacity: _fadeIn,
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.center,
                         children: [
                           const SizedBox(height: 20),
-                          
+
                           // Hero Avatar
                           MagicalAvatar(
-                            initial: userName.isNotEmpty ? userName[0].toUpperCase() : 'S',
+                            initial: userName.isNotEmpty
+                                ? userName[0].toUpperCase()
+                                : 'S',
                             radius: isMobile ? 60 : 80,
                           ),
-                          
+
                           const SizedBox(height: 30),
-                          
+
                           // Name & Role
                           Text(
                             userName,
@@ -189,7 +207,10 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                           ),
                           const SizedBox(height: 8),
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 6,
+                            ),
                             decoration: BoxDecoration(
                               color: const Color(0xFF38BDF8).withOpacity(0.15),
                               borderRadius: BorderRadius.circular(20),
@@ -207,9 +228,9 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                               ),
                             ),
                           ),
-                          
+
                           const SizedBox(height: 40),
-                          
+
                           // Stats Cards
                           Center(
                             child: Wrap(
@@ -244,9 +265,9 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                               ],
                             ),
                           ),
-                          
+
                           const SizedBox(height: 40),
-                          
+
                           // Email Info (Glass panel)
                           ClipRRect(
                             borderRadius: BorderRadius.circular(20),
@@ -257,7 +278,9 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                                 decoration: BoxDecoration(
                                   color: Colors.white.withOpacity(0.05),
                                   borderRadius: BorderRadius.circular(20),
-                                  border: Border.all(color: Colors.white.withOpacity(0.1)),
+                                  border: Border.all(
+                                    color: Colors.white.withOpacity(0.1),
+                                  ),
                                 ),
                                 child: Row(
                                   children: [
@@ -276,12 +299,15 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                                     const SizedBox(width: 16),
                                     Expanded(
                                       child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
                                         children: [
                                           Text(
                                             'Email Address',
                                             style: TextStyle(
-                                              color: Colors.white.withOpacity(0.6),
+                                              color: Colors.white.withOpacity(
+                                                0.6,
+                                              ),
                                               fontSize: 13,
                                             ),
                                           ),
@@ -302,23 +328,81 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                               ),
                             ),
                           ),
-                          
+
                           const SizedBox(height: 40),
-                          
-                          // Logout Button
+
+                          // Face ID Button
                           GestureDetector(
-                            onTap: _logout,
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) =>
+                                      const FaceVerificationScreen(
+                                        isRegistration: true,
+                                      ),
+                                ),
+                              );
+                            },
                             child: Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                                vertical: 16,
+                              ),
                               decoration: BoxDecoration(
-                                color: Colors.redAccent.withOpacity(0.1),
+                                color: Colors.blueAccent.withOpacity(0.1),
                                 borderRadius: BorderRadius.circular(30),
-                                border: Border.all(color: Colors.redAccent.withOpacity(0.3)),
+                                border: Border.all(
+                                  color: Colors.blueAccent.withOpacity(0.3),
+                                ),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.logout_rounded, color: Colors.redAccent, size: 20),
+                                  Icon(
+                                    Icons.face_retouching_natural,
+                                    color: Colors.blueAccent,
+                                    size: 20,
+                                  ),
+                                  SizedBox(width: 12),
+                                  Text(
+                                    "Face ID",
+                                    style: TextStyle(
+                                      color: Colors.blueAccent,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+
+                          const SizedBox(height: 40),
+
+                          // Logout Button
+                          GestureDetector(
+                            onTap: _logout,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 32,
+                                vertical: 16,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.redAccent.withOpacity(0.1),
+                                borderRadius: BorderRadius.circular(30),
+                                border: Border.all(
+                                  color: Colors.redAccent.withOpacity(0.3),
+                                ),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.logout_rounded,
+                                    color: Colors.redAccent,
+                                    size: 20,
+                                  ),
                                   SizedBox(width: 12),
                                   Text(
                                     "Logout",
@@ -332,7 +416,7 @@ class _StudentProfileScreenState extends State<StudentProfileScreen>
                               ),
                             ),
                           ),
-                          
+
                           const SizedBox(height: 40),
                         ],
                       ),

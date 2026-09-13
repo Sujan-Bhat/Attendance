@@ -99,6 +99,8 @@ class AttendanceSession(models.Model):
     teacher = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_sessions')
     
     class_type = models.CharField(max_length=10, choices=CLASS_TYPE_CHOICES, default='qr')
+    totp_secret = models.CharField(max_length=64, blank=True, null=True)
+    rotation_interval = models.IntegerField(default=10)
 
     pattern_code = models.CharField(max_length=50, blank=True, null=True)
     instruction_card = models.TextField(blank=True, null=True)

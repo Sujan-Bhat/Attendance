@@ -179,18 +179,123 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
     }
   }
 
+  Future<void> _deleteAnnouncement(int id) async {
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Delete Announcement'),
+        content: const Text('Are you sure you want to delete this announcement?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    setState(() => _isLoadingAnnouncements = true);
+    final success = await _announcementService.deleteAnnouncement(id);
+    if (success) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Deleted successfully'), backgroundColor: Colors.green));
+      _loadData();
+    } else {
+      setState(() => _isLoadingAnnouncements = false);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Failed to delete'), backgroundColor: Colors.red));
+    }
+  }
+
+  void _editAnnouncement(Map<String, dynamic> ann) {
+    final titleController = TextEditingController(text: ann['title'] ?? '');
+    final contentController = TextEditingController(text: ann['content'] ?? '');
+    bool isUrgent = ann['is_urgent'] ?? false;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setStateDialog) {
+            return AlertDialog(
+              title: const Text('Edit Announcement'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    TextField(
+                      controller: titleController,
+                      decoration: const InputDecoration(labelText: 'Title', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 16),
+                    TextField(
+                      controller: contentController,
+                      maxLines: 4,
+                      decoration: const InputDecoration(labelText: 'Message', border: OutlineInputBorder()),
+                    ),
+                    const SizedBox(height: 16),
+                    SwitchListTile(
+                      title: const Text('Urgent'),
+                      value: isUrgent,
+                      onChanged: (val) => setStateDialog(() => isUrgent = val),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(context);
+                    setState(() => _isLoadingAnnouncements = true);
+                    final result = await _announcementService.updateAnnouncement(
+                      id: ann['id'],
+                      title: titleController.text.trim(),
+                      content: contentController.text.trim(),
+                      isUrgent: isUrgent,
+                    );
+                    if (result['success'] == true) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Updated successfully'), backgroundColor: Colors.green));
+                      _loadData();
+                    } else {
+                      setState(() => _isLoadingAnnouncements = false);
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(result['message'] ?? 'Failed to update'), backgroundColor: Colors.red));
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1E5B53), foregroundColor: Colors.white),
+                  child: const Text('Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final bool isWideScreen = MediaQuery.of(context).size.width > 900;
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Announcements'),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Announcements'),
+            const Text(
+              "Send updates to a full class or a single student, and track what's already gone out.",
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.normal, color: Colors.white70),
+            ),
+          ],
+        ),
         backgroundColor: const Color(0xFF1E5B53),
         foregroundColor: Colors.white,
       ),
       body: Container(
-        color: const Color(0xFFF4F6F6),
+        color: const Color(0xFFF4EDDC),
         child: isWideScreen
             ? Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -213,7 +318,7 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
       child: Column(
         children: [
           Container(
-            color: Colors.white,
+            color: const Color(0xFFF4EDDC),
             child: const TabBar(
               labelColor: Color(0xFF1E5B53),
               indicatorColor: Color(0xFF1E5B53),
@@ -237,184 +342,205 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
   }
 
   Widget _buildComposerCard() {
-    return Card(
-      margin: const EdgeInsets.all(16),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      child: Padding(
-        padding: const EdgeInsets.all(20.0),
-        key: const ValueKey('composer_form_padding'),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'New Announcement',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E5B53)),
+    return Padding(
+      padding: const EdgeInsets.all(24.0),
+      child: Form(
+        key: _formKey,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'New Announcement',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+            ),
+            const SizedBox(height: 20),
+            
+            // Target buttons (Segmented Control)
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(25),
+                border: Border.all(color: Colors.grey.shade400),
               ),
-              const SizedBox(height: 16),
-              
-              // Target buttons (Figma selector)
-              Row(
+              child: Row(
                 children: [
-                  _buildTargetButton('Class', 'class', Icons.class_rounded),
-                  const SizedBox(width: 8),
-                  _buildTargetButton('Individual', 'individual', Icons.person_rounded),
-                  const SizedBox(width: 8),
-                  _buildTargetButton('Low Attend.', 'low_attendance', Icons.trending_down_rounded),
+                  _buildTargetButton('Class', 'class', true, false),
+                  _buildTargetButton('Individual', 'individual', false, false),
+                  _buildTargetButton('Low Attendance', 'low_attendance', false, true),
                 ],
               ),
-              const SizedBox(height: 20),
+            ),
+            const SizedBox(height: 24),
 
-              // Class Dropdown
-              _isLoadingClasses
-                  ? const Center(child: CircularProgressIndicator())
-                  : DropdownButtonFormField<int>(
-                      decoration: const InputDecoration(
-                        labelText: 'Select Class',
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.school_rounded),
+            // Class Dropdown
+            _isLoadingClasses
+                ? const Center(child: CircularProgressIndicator())
+                : DropdownButtonFormField<int>(
+                    decoration: InputDecoration(
+                      labelText: 'Select Class',
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Color(0xFF1E5B53)),
                       ),
-                      value: _selectedClassId,
-                      items: _classes.map((c) {
-                        return DropdownMenuItem<int>(
-                          value: c['id'],
-                          child: Text('${c['class_code']} - ${c['class_name']}'),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        setState(() {
-                          _selectedClassId = val;
-                        });
-                        if (val != null && _targetType == 'individual') {
-                          _loadStudents(val);
-                        }
-                      },
-                      validator: (val) => val == null ? 'Please select a class' : null,
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Colors.black54),
+                      ),
                     ),
-              const SizedBox(height: 16),
-
-              // Student Dropdown (Only visible if individual)
-              if (_targetType == 'individual') ...[
-                if (_isLoadingStudents)
-                  const Center(child: CircularProgressIndicator())
-                else if (_selectedClassId == null)
-                  const Text('Select a class first to list students', style: TextStyle(color: Colors.grey))
-                else if (_students.isEmpty)
-                  const Text('No students enrolled in this class', style: TextStyle(color: Colors.grey))
-                else
-                  DropdownButtonFormField<int>(
-                    decoration: const InputDecoration(
-                      labelText: 'Select Student',
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.person_rounded),
-                    ),
-                    value: _selectedStudentId,
-                    items: _students.map((s) {
+                    value: _selectedClassId,
+                    items: _classes.map((c) {
                       return DropdownMenuItem<int>(
-                        value: s['id'],
-                        child: Text(s['username'] ?? s['email'] ?? ''),
+                        value: c['id'],
+                        child: Text('${c['class_code'] != null ? '[${c['class_code']}] ' : ''}${c['class_name']}'),
                       );
                     }).toList(),
                     onChanged: (val) {
                       setState(() {
-                        _selectedStudentId = val;
+                        _selectedClassId = val;
                       });
+                      if (val != null && _targetType == 'individual') {
+                        _loadStudents(val);
+                      }
                     },
-                    validator: (val) => val == null ? 'Please select a student' : null,
+                    validator: (val) => val == null ? 'Please select a class' : null,
                   ),
-                const SizedBox(height: 16),
-              ],
+            const SizedBox(height: 16),
 
-              // Low Attendance Threshold Slider (Only visible if low_attendance)
-              if (_targetType == 'low_attendance') ...[
-                Text(
-                  'Minimum Attendance: $_minAttendanceThreshold%',
-                  style: const TextStyle(fontWeight: FontWeight.bold),
-                ),
-                Slider(
-                  value: _minAttendanceThreshold.toDouble(),
-                  min: 10,
-                  max: 100,
-                  divisions: 18,
-                  activeColor: const Color(0xFF1E5B53),
-                  label: '$_minAttendanceThreshold%',
-                  onChanged: (double val) {
+            // Student Dropdown (Only visible if individual)
+            if (_targetType == 'individual') ...[
+              if (_isLoadingStudents)
+                const Center(child: CircularProgressIndicator())
+              else if (_selectedClassId == null)
+                const Text('Select a class first to list students', style: TextStyle(color: Colors.grey))
+              else if (_students.isEmpty)
+                const Text('No students enrolled in this class', style: TextStyle(color: Colors.grey))
+              else
+                DropdownButtonFormField<int>(
+                  decoration: InputDecoration(
+                    labelText: 'Select Student',
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Color(0xFF1E5B53)),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.black54),
+                    ),
+                  ),
+                  value: _selectedStudentId,
+                  items: _students.map((s) {
+                    return DropdownMenuItem<int>(
+                      value: s['id'],
+                      child: Text(s['username'] ?? s['email'] ?? ''),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
                     setState(() {
-                      _minAttendanceThreshold = val.round();
+                      _selectedStudentId = val;
                     });
                   },
+                  validator: (val) => val == null ? 'Please select a student' : null,
                 ),
-                const SizedBox(height: 16),
-              ],
-
-              // Title Field
-              TextFormField(
-                controller: _titleController,
-                decoration: const InputDecoration(
-                  labelText: 'Title',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (val) => val == null || val.trim().isEmpty ? 'Please enter a title' : null,
-              ),
               const SizedBox(height: 16),
+            ],
 
-              // Message Field
-              TextFormField(
-                controller: _contentController,
-                maxLines: 4,
-                decoration: const InputDecoration(
-                  labelText: 'Message',
-                  hintText: 'Write what students or class needs to know...',
-                  border: OutlineInputBorder(),
-                ),
-                validator: (val) => val == null || val.trim().isEmpty ? 'Please enter a message' : null,
+            // Low Attendance Threshold Slider (Only visible if low_attendance)
+            if (_targetType == 'low_attendance') ...[
+              Text(
+                'Minimum Attendance: $_minAttendanceThreshold%',
+                style: const TextStyle(fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 16),
-
-              // Mark as urgent
-              SwitchListTile(
-                contentPadding: EdgeInsets.zero,
-                title: const Text('Mark as urgent'),
-                value: _isUrgent,
+              Slider(
+                value: _minAttendanceThreshold.toDouble(),
+                min: 10,
+                max: 100,
+                divisions: 18,
                 activeColor: const Color(0xFF1E5B53),
-                onChanged: (val) {
-                  setState(() => _isUrgent = val);
+                label: '$_minAttendanceThreshold%',
+                onChanged: (double val) {
+                  setState(() {
+                    _minAttendanceThreshold = val.round();
+                  });
                 },
               ),
               const SizedBox(height: 16),
+            ],
 
-              // Send button
-              SizedBox(
-                width: double.infinity,
-                height: 50,
-                child: ElevatedButton.icon(
-                  onPressed: _isSending ? null : _sendAnnouncement,
-                  icon: _isSending
-                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                      : const Icon(Icons.send_rounded),
-                  label: const Text('Send Announcement', style: TextStyle(fontSize: 16)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF1E5B53),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
+            // Title Field (Optional, hide if you want to match exactly, but let's keep it styled)
+            TextFormField(
+              controller: _titleController,
+              decoration: InputDecoration(
+                labelText: 'Title',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black54),
                 ),
               ),
-            ],
-          ),
+              validator: (val) => val == null || val.trim().isEmpty ? 'Please enter a title' : null,
+            ),
+            const SizedBox(height: 16),
+
+            // Message Field
+            TextFormField(
+              controller: _contentController,
+              maxLines: 4,
+              decoration: InputDecoration(
+                hintText: 'Write what students or class needs to know...',
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                  borderSide: const BorderSide(color: Colors.black54),
+                ),
+              ),
+              validator: (val) => val == null || val.trim().isEmpty ? 'Please enter a message' : null,
+            ),
+            const SizedBox(height: 16),
+
+            // Mark as urgent
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Mark as urgent'),
+              value: _isUrgent,
+              activeColor: const Color(0xFF1E5B53),
+              onChanged: (val) {
+                setState(() => _isUrgent = val);
+              },
+            ),
+            const SizedBox(height: 16),
+
+            // Send button
+            SizedBox(
+              width: double.infinity,
+              height: 50,
+              child: ElevatedButton.icon(
+                onPressed: _isSending ? null : _sendAnnouncement,
+                icon: _isSending
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    : const Icon(Icons.send_rounded),
+                label: const Text('Send Announcement', style: TextStyle(fontSize: 16)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF1E5B53),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _buildTargetButton(String label, String type, IconData icon) {
+  Widget _buildTargetButton(String label, String type, bool isFirst, bool isLast) {
     final bool isSelected = _targetType == type;
     return Expanded(
-      child: OutlinedButton.icon(
-        onPressed: () {
+      child: GestureDetector(
+        onTap: () {
           setState(() {
             _targetType = type;
             if (type != 'individual') {
@@ -425,20 +551,23 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
             }
           });
         },
-        icon: Icon(icon, size: 16, color: isSelected ? Colors.white : Colors.black87),
-        label: Text(
-          label,
-          style: TextStyle(
-            fontSize: 12,
-            fontWeight: FontWeight.bold,
-            color: isSelected ? Colors.white : Colors.black87,
-          ),
-        ),
-        style: OutlinedButton.styleFrom(
-          backgroundColor: isSelected ? const Color(0xFF1E5B53) : Colors.white,
-          side: BorderSide(color: isSelected ? const Color(0xFF1E5B53) : Colors.grey.shade400),
+        child: Container(
           padding: const EdgeInsets.symmetric(vertical: 12),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          decoration: BoxDecoration(
+            color: isSelected ? const Color(0xFF1E5B53) : Colors.transparent,
+            borderRadius: BorderRadius.horizontal(
+              left: isFirst ? const Radius.circular(25) : Radius.zero,
+              right: isLast ? const Radius.circular(25) : Radius.zero,
+            ),
+          ),
+          alignment: Alignment.center,
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: 13,
+              color: isSelected ? Colors.white : Colors.black87,
+            ),
+          ),
         ),
       ),
     );
@@ -446,10 +575,12 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
 
   Widget _buildRecentList() {
     return Padding(
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(24.0),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          const Text('Recent Announcements', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 16),
           // Filter & Search bar
           Row(
             children: [
@@ -457,11 +588,18 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
                 child: TextField(
                   controller: _searchController,
                   decoration: InputDecoration(
-                    hintText: 'Search...',
+                    hintText: 'Search announcements...',
                     prefixIcon: const Icon(Icons.search),
-                    fillColor: Colors.white,
+                    fillColor: const Color(0xFFF4EDDC),
                     filled: true,
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.black54),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(color: Colors.black54),
+                    ),
                   ),
                 ),
               ),
@@ -469,8 +607,9 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(8),
+                  color: const Color(0xFFF4EDDC),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.black54),
                 ),
                 child: DropdownButton<String>(
                   value: _filterType,
@@ -496,9 +635,7 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
               ),
             ],
           ),
-          const SizedBox(height: 16),
-          const Text('Recent Announcements', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
+          const SizedBox(height: 24),
           
           Expanded(
             child: _isLoadingAnnouncements
@@ -523,105 +660,109 @@ class _TeacherAnnouncementsScreenState extends State<TeacherAnnouncementsScreen>
     final String initial = senderName.isNotEmpty ? senderName[0].toUpperCase() : 'T';
     
     // Tag UI
-    Color tagColor = Colors.grey;
     String tagLabel = 'Class';
     if (ann['target_type'] == 'individual') {
-      tagColor = Colors.blue;
       tagLabel = 'Private';
     } else if (ann['target_type'] == 'low_attendance') {
-      tagColor = Colors.orange;
-      tagLabel = 'Low Attendance (${ann['min_attendance_threshold'] ?? 75}%)';
+      tagLabel = 'Low Attendance';
+    } else if (ann['class_name'] != null) {
+      tagLabel = ann['class_name'];
     } else if (ann['class_code'] != null) {
       tagLabel = ann['class_code'];
-      tagColor = const Color(0xFF1E5B53);
     }
 
     final bool isUrgent = ann['is_urgent'] == true;
 
-    return Card(
+    return Container(
       margin: const EdgeInsets.only(bottom: 12),
-      elevation: 2,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(10),
-        side: isUrgent ? const BorderSide(color: Colors.red, width: 1.5) : BorderSide.none,
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF0E0C1), // Slightly darker beige card color
+        borderRadius: BorderRadius.circular(16),
+        border: isUrgent ? Border.all(color: Colors.red, width: 1.5) : null,
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                CircleAvatar(
-                  backgroundColor: isUrgent ? Colors.red.shade100 : const Color(0xFFE2EFEA),
-                  child: Text(
-                    initial,
-                    style: TextStyle(
-                      color: isUrgent ? Colors.red : const Color(0xFF1E5B53),
-                      fontWeight: FontWeight.bold,
-                    ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              CircleAvatar(
+                backgroundColor: const Color(0xFFB03A2E), // Red avatar background
+                child: Text(
+                  initial,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 6,
-                        runSpacing: 4,
-                        children: [
-                          ConstrainedBox(
-                            constraints: const BoxConstraints(maxWidth: 160),
-                            child: Text(
-                              senderName,
-                              overflow: TextOverflow.ellipsis,
-                              maxLines: 1,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15),
-                            ),
-                          ),
-                          if (isUrgent)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                              decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)),
-                              child: const Text('URGENT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
-                            ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          senderName,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        if (isUrgent) ...[
+                          const SizedBox(width: 8),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(color: tagColor.withOpacity(0.15), borderRadius: BorderRadius.circular(4)),
-                            child: Text(
-                              tagLabel,
-                              style: TextStyle(color: tagColor, fontSize: 9, fontWeight: FontWeight.bold),
-                            ),
+                            decoration: BoxDecoration(color: Colors.red, borderRadius: BorderRadius.circular(4)),
+                            child: const Text('URGENT', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold)),
                           ),
-                        ],
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        ann['created_at'] != null
-                            ? DateTime.parse(ann['created_at']).toLocal().toString().substring(0, 16)
-                            : '',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                      ),
-                    ],
-                  ),
+                        ]
+                      ],
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      tagLabel,
+                      style: const TextStyle(color: Color(0xFF2C7A7B), fontSize: 13),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-            const SizedBox(height: 12),
+              ),
+              PopupMenuButton<String>(
+                onSelected: (value) {
+                  if (value == 'edit') {
+                    _editAnnouncement(ann);
+                  } else if (value == 'delete') {
+                    _deleteAnnouncement(ann['id']);
+                  }
+                },
+                itemBuilder: (context) => [
+                  const PopupMenuItem(value: 'edit', child: Text('Edit')),
+                  const PopupMenuItem(value: 'delete', child: Text('Delete', style: TextStyle(color: Colors.red))),
+                ],
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // We can optionally show the title here if it exists. The image shows the message directly.
+          if (ann['title'] != null && ann['title'].toString().isNotEmpty) ...[
             Text(
-              ann['title'] ?? '',
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
+              ann['title'],
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.black87),
             ),
-            const SizedBox(height: 6),
-            Text(
-              ann['content'] ?? '',
-              style: const TextStyle(color: Colors.black87, height: 1.3),
-            ),
+            const SizedBox(height: 4),
           ],
-        ),
+          Text(
+            ann['content'] ?? '',
+            style: const TextStyle(color: Colors.black87, height: 1.3),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            ann['created_at'] != null
+                ? DateTime.parse(ann['created_at']).toLocal().toString().substring(0, 16)
+                : '',
+            style: TextStyle(color: Colors.grey.shade600, fontSize: 11),
+          ),
+        ],
       ),
     );
   }

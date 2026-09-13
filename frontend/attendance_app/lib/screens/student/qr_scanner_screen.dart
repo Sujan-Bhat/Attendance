@@ -273,7 +273,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       final isNetworkOffline =
           connectivityResults.isEmpty ||
           connectivityResults.contains(ConnectivityResult.none);
-      
+
       final isOfflineSession = data['is_offline'] == true;
       final isOffline = isNetworkOffline || isOfflineSession;
 
@@ -283,8 +283,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         // STRICT BLE ENFORCEMENT: Verify presence via BLE Mesh FIRST
         _showBleVerificationDialog();
         final bleResult = await BleMeshService().startStudentScanAndRelay(
-            sessionId,
-            timeout: const Duration(seconds: 15));
+          sessionId,
+          timeout: const Duration(seconds: 15),
+        );
         bleHopCount = bleResult['hop_count'];
         bleRssi = bleResult['rssi'];
         // pop the verifying dialog
@@ -293,39 +294,92 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         print("BLE mesh verification failed: $e");
         // Pop the verifying dialog
         Navigator.of(context, rootNavigator: true).pop();
-        _showError('BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.');
+        _showError(
+          'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
+        );
         setState(() => isProcessing = false);
         return;
       }
 
-      if (isOffline) {
-        final timestamp = DateTime.now().toUtc().toIso8601String();
-        await SyncService().enqueueQRScan(sessionId, timestamp, bleHopCount: bleHopCount, bleRssi: bleRssi);
+      final token = data['token'];
 
-        setState(() {
-          hasScanned = true;
-          isProcessing = false;
-        });
+      if (token != null) {
+        if (mounted) {
+          final captcha = await _showCaptchaDialog();
+          if (captcha == null) {
+            setState(() => isProcessing = false);
+            return;
+          }
 
-        _showSuccessDialog(
-          'Offline Mode: QR scan saved locally. It will sync automatically when internet is restored.',
-        );
-        return;
-      }
+          if (isOffline) {
+            final timestamp = DateTime.now().toUtc().toIso8601String();
+            await SyncService().enqueueQRScan(
+              sessionId,
+              timestamp,
+              qrToken: token,
+              captcha: captcha,
+              bleHopCount: bleHopCount,
+              bleRssi: bleRssi,
+            );
+            setState(() {
+              hasScanned = true;
+              isProcessing = false;
+            });
+            _showSuccessDialog(
+              'Offline Mode: QR scan saved locally. It will sync automatically when internet is restored.',
+            );
+            return;
+          }
 
-      final result = await _attendanceService.markAttendance(
+          final result = await _attendanceService.markAttendance(
+            sessionId,
+            qrToken: token,
+            captcha: captcha,
+          );
+
+          if (mounted) {
+            if (result['success']) {
+              setState(() => hasScanned = true);
+              _showSuccessDialog(result['message']);
+            } else {
+              _showError(result['message']);
+              setState(() => isProcessing = false);
+            }
+          }
+        }
+      } else {
+        if (isOffline) {
+          final timestamp = DateTime.now().toUtc().toIso8601String();
+          await SyncService().enqueueQRScan(
+            sessionId,
+            timestamp,
+            bleHopCount: bleHopCount,
+            bleRssi: bleRssi,
+          );
+          setState(() {
+            hasScanned = true;
+            isProcessing = false;
+          });
+          _showSuccessDialog(
+            'Offline Mode: QR scan saved locally. It will sync automatically when internet is restored.',
+          );
+          return;
+        }
+
+        final result = await _attendanceService.markAttendance(
           sessionId,
           bleHopCount: bleHopCount,
-          bleRssi: bleRssi
-      );
+          bleRssi: bleRssi,
+        );
 
-      if (mounted) {
-        if (result['success']) {
-          setState(() => hasScanned = true);
-          _showSuccessDialog(result['message']);
-        } else {
-          _showError(result['message']);
-          setState(() => isProcessing = false);
+        if (mounted) {
+          if (result['success']) {
+            setState(() => hasScanned = true);
+            _showSuccessDialog(result['message']);
+          } else {
+            _showError(result['message']);
+            setState(() => isProcessing = false);
+          }
         }
       }
     } catch (e) {
@@ -373,7 +427,10 @@ class _QRScannerScreenState extends State<QRScannerScreen>
           sessions = await _sessionService.getStudentActiveSessions();
         } catch (e) {
           final errorStr = e.toString().toLowerCase();
-          if (errorStr.contains('dioexception') || errorStr.contains('socketexception') || errorStr.contains('failed host lookup') || errorStr.contains('connection error')) {
+          if (errorStr.contains('dioexception') ||
+              errorStr.contains('socketexception') ||
+              errorStr.contains('failed host lookup') ||
+              errorStr.contains('connection error')) {
             isOffline = true;
           } else {
             _showError('Network/API Error: $e');
@@ -416,23 +473,30 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       // BLE MESH VERIFICATION (Enforced for Pattern mode too)
       int bleHopCount;
       int bleRssi;
-      
+
       try {
         _showBleVerificationDialog();
         if (isOffline) {
-           final bleResult = await BleMeshService().startStudentScanAnySession(timeout: const Duration(seconds: 15));
-           bleHopCount = bleResult['hop_count'];
-           bleRssi = bleResult['rssi'];
+          final bleResult = await BleMeshService().startStudentScanAnySession(
+            timeout: const Duration(seconds: 15),
+          );
+          bleHopCount = bleResult['hop_count'];
+          bleRssi = bleResult['rssi'];
         } else {
-           final bleResult = await BleMeshService().startStudentScanAndRelay(sessionId!, timeout: const Duration(seconds: 15));
-           bleHopCount = bleResult['hop_count'];
-           bleRssi = bleResult['rssi'];
+          final bleResult = await BleMeshService().startStudentScanAndRelay(
+            sessionId!,
+            timeout: const Duration(seconds: 15),
+          );
+          bleHopCount = bleResult['hop_count'];
+          bleRssi = bleResult['rssi'];
         }
         Navigator.of(context, rootNavigator: true).pop();
       } catch (e) {
         print("BLE mesh verification failed for pattern: $e");
         Navigator.of(context, rootNavigator: true).pop();
-        _showError('BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.');
+        _showError(
+          'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
+        );
         setState(() => isProcessing = false);
         await _cameraController!.resumePreview();
         return;
@@ -440,7 +504,12 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (isOffline) {
         final timestamp = DateTime.now().toUtc().toIso8601String();
-        await SyncService().enqueuePatternScan(imagePath, timestamp, bleHopCount: bleHopCount, bleRssi: bleRssi);
+        await SyncService().enqueuePatternScan(
+          imagePath,
+          timestamp,
+          bleHopCount: bleHopCount,
+          bleRssi: bleRssi,
+        );
         if (mounted) {
           setState(() => hasScanned = true);
           _showSuccessDialog(
@@ -909,6 +978,72 @@ class _QRScannerScreenState extends State<QRScannerScreen>
           ),
         ),
       ),
+    );
+  }
+
+  Future<String?> _showCaptchaDialog() async {
+    final TextEditingController captchaController = TextEditingController();
+    final formKey = GlobalKey<FormState>();
+
+    return showDialog<String>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Enter Captcha Code'),
+          content: Form(
+            key: formKey,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'Please enter the 4-character code shown on the screen to verify your presence.',
+                  style: TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                TextFormField(
+                  controller: captchaController,
+                  autofocus: true,
+                  textCapitalization: TextCapitalization.characters,
+                  maxLength: 4,
+                  decoration: const InputDecoration(
+                    labelText: 'Captcha Code',
+                    hintText: 'ABCD',
+                    border: OutlineInputBorder(),
+                  ),
+                  validator: (val) {
+                    if (val == null || val.trim().length != 4) {
+                      return 'Code must be exactly 4 characters';
+                    }
+                    return null;
+                  },
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, null),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton(
+              onPressed: () {
+                if (formKey.currentState!.validate()) {
+                  Navigator.pop(
+                    context,
+                    captchaController.text.trim().toUpperCase(),
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1E5B53),
+                foregroundColor: Colors.white,
+              ),
+              child: const Text('Submit'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

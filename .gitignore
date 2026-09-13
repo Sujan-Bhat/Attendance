@@ -36,6 +36,7 @@ frontend/attendance_app/out.txt
 
 # Flutter/Dart
 frontend/attendance_app/build/
+frontend/attendance_app/android/build/
 frontend/attendance_app/.dart_tool/
 frontend/attendance_app/.packages
 frontend/attendance_app/.flutter-plugins

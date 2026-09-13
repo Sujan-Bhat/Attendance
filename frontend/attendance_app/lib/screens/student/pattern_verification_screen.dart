@@ -21,8 +21,10 @@ class _PatternVerificationScreenState extends State<PatternVerificationScreen> {
   final AttendanceService _attendanceService = AttendanceService();
   bool _isProcessing = false;
   String? _capturedImagePath;
+  bool _offlineMode = false;
 
   static const _channel = MethodChannel('attendance_app/camera');
+  static const _offlineChannel = MethodChannel('attendance_app/offline');
 
   Future<void> _captureImage() async {
     String? imagePath;

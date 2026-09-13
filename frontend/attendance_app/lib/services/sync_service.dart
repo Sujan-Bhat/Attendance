@@ -72,23 +72,38 @@ class SyncService {
         if (oldVersion < 4) {
           try {
             await db.execute(
-                'ALTER TABLE offline_sessions ADD COLUMN class_type TEXT NOT NULL DEFAULT "qr"');
+              'ALTER TABLE offline_sessions ADD COLUMN class_type TEXT NOT NULL DEFAULT "qr"',
+            );
           } catch (e) {
             // Ignore if column already exists
           }
         }
         if (oldVersion < 5) {
           try {
-            await db.execute('ALTER TABLE offline_qr_queue ADD COLUMN ble_hop_count INTEGER');
-            await db.execute('ALTER TABLE offline_qr_queue ADD COLUMN ble_rssi INTEGER');
+            await db.execute(
+              'ALTER TABLE offline_qr_queue ADD COLUMN ble_hop_count INTEGER',
+            );
+            await db.execute(
+              'ALTER TABLE offline_qr_queue ADD COLUMN ble_rssi INTEGER',
+            );
+            await db.execute(
+              'ALTER TABLE offline_qr_queue ADD COLUMN qr_token TEXT',
+            );
+            await db.execute(
+              'ALTER TABLE offline_qr_queue ADD COLUMN captcha TEXT',
+            );
           } catch (e) {
             // Ignore if columns already exist
           }
         }
         if (oldVersion < 6) {
           try {
-            await db.execute('ALTER TABLE offline_queue ADD COLUMN ble_hop_count INTEGER');
-            await db.execute('ALTER TABLE offline_queue ADD COLUMN ble_rssi INTEGER');
+            await db.execute(
+              'ALTER TABLE offline_queue ADD COLUMN ble_hop_count INTEGER',
+            );
+            await db.execute(
+              'ALTER TABLE offline_queue ADD COLUMN ble_rssi INTEGER',
+            );
           } catch (e) {
             // Ignore if columns already exist
           }
@@ -125,6 +140,8 @@ class SyncService {
             timestamp TEXT NOT NULL,
             ble_hop_count INTEGER,
             ble_rssi INTEGER,
+            qr_token TEXT,
+            captcha TEXT,
             status TEXT DEFAULT 'pending'
           )
         ''');
@@ -172,7 +189,12 @@ class SyncService {
     debugPrint('Queued offline session ${sessionData['id']}');
   }
 
-  Future<void> enqueuePatternScan(String imagePath, String timestamp, {int? bleHopCount, int? bleRssi}) async {
+  Future<void> enqueuePatternScan(
+    String imagePath,
+    String timestamp, {
+    int? bleHopCount,
+    int? bleRssi,
+  }) async {
     final item = {
       'id': DateTime.now().millisecondsSinceEpoch,
       'image_path': imagePath,
@@ -269,7 +291,7 @@ class SyncService {
     if (_isSyncing) return;
     _isSyncing = true;
     bool anythingSynced = false;
-    
+
     try {
       // 1. Sync Sessions First
       List<Map<String, dynamic>> pendingSessions = [];
@@ -360,18 +382,25 @@ class SyncService {
           final id = record['id'];
           final imagePath = record['image_path'] as String;
           final timestamp = record['timestamp'] as String;
-          
+
           // Check 24-hour expiration
           final scanTime = DateTime.parse(timestamp);
-          if (DateTime.now().toUtc().difference(scanTime.toUtc()).inHours >= 24) {
-            debugPrint('Discarding expired pattern scan $id (older than 24 hours)');
+          if (DateTime.now().toUtc().difference(scanTime.toUtc()).inHours >=
+              24) {
+            debugPrint(
+              'Discarding expired pattern scan $id (older than 24 hours)',
+            );
             if (kIsWeb) {
               final list = await _getWebList('offline_queue');
               list.removeWhere((e) => e['id'] == id);
               await _saveWebList('offline_queue', list);
             } else {
               final db = await database;
-              await db.delete('offline_queue', where: 'id = ?', whereArgs: [id]);
+              await db.delete(
+                'offline_queue',
+                where: 'id = ?',
+                whereArgs: [id],
+              );
             }
             continue;
           }
@@ -452,10 +481,13 @@ class SyncService {
           final id = record['id'];
           final sessionId = record['session_id'] as String;
           final timestamp = record['timestamp'] as String;
+          final qrToken = record['qr_token'] as String?;
+          final captcha = record['captcha'] as String?;
 
           // Check 24-hour expiration
           final scanTime = DateTime.parse(timestamp);
-          if (DateTime.now().toUtc().difference(scanTime.toUtc()).inHours >= 24) {
+          if (DateTime.now().toUtc().difference(scanTime.toUtc()).inHours >=
+              24) {
             debugPrint('Discarding expired QR scan $id (older than 24 hours)');
             if (kIsWeb) {
               final list = await _getWebList('offline_qr_queue');
@@ -463,7 +495,11 @@ class SyncService {
               await _saveWebList('offline_qr_queue', list);
             } else {
               final db = await database;
-              await db.delete('offline_qr_queue', where: 'id = ?', whereArgs: [id]);
+              await db.delete(
+                'offline_qr_queue',
+                where: 'id = ?',
+                whereArgs: [id],
+              );
             }
             continue;
           }
@@ -474,6 +510,8 @@ class SyncService {
           try {
             final result = await _attendanceService.markAttendance(
               sessionId,
+              qrToken: qrToken,
+              captcha: captcha,
               isOfflineSync: true,
               timestamp: timestamp,
               bleHopCount: bleHopCount,
@@ -512,13 +550,22 @@ class SyncService {
     }
   }
 
-  Future<void> enqueueQRScan(String sessionId, String timestamp, {int? bleHopCount, int? bleRssi}) async {
+  Future<void> enqueueQRScan(
+    String sessionId,
+    String timestamp, {
+    int? bleHopCount,
+    int? bleRssi,
+    String? qrToken,
+    String? captcha,
+  }) async {
     final item = {
       'id': DateTime.now().millisecondsSinceEpoch,
       'session_id': sessionId,
       'timestamp': timestamp,
       'ble_hop_count': bleHopCount,
       'ble_rssi': bleRssi,
+      'qr_token': qrToken,
+      'captcha': captcha,
       'status': 'pending',
     };
 

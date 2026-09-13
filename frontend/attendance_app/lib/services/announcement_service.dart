@@ -87,4 +87,54 @@ class AnnouncementService {
       return {'success': false, 'message': errorMessage};
     }
   }
+
+  /// Update an existing announcement
+  Future<Map<String, dynamic>> updateAnnouncement({
+    required int id,
+    required String title,
+    required String content,
+    required bool isUrgent,
+  }) async {
+    try {
+      final token = await _getToken();
+      final response = await _dio.put(
+        '/announcements/$id/',
+        data: {
+          'title': title,
+          'content': content,
+          'is_urgent': isUrgent,
+        },
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      if (response.statusCode == 200) {
+        return {'success': true, 'announcement': response.data};
+      }
+      return {'success': false, 'message': 'Failed to update announcement'};
+    } on DioException catch (e) {
+      String errorMessage = 'Failed to update announcement';
+      if (e.response != null && e.response!.data is Map) {
+        final data = e.response!.data;
+        if (data.containsKey('error')) {
+          errorMessage = data['error'];
+        }
+      }
+      return {'success': false, 'message': errorMessage};
+    }
+  }
+
+  /// Delete an announcement
+  Future<bool> deleteAnnouncement(int id) async {
+    try {
+      final token = await _getToken();
+      final response = await _dio.delete(
+        '/announcements/$id/',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+      return response.statusCode == 204;
+    } catch (e) {
+      print('Delete announcement error: $e');
+      return false;
+    }
+  }
 }

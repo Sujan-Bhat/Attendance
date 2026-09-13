@@ -32,6 +32,7 @@ class _SessionPageState extends State<SessionPage>
   String selectedClassType = 'qr'; // Default to qr
 
   final TextEditingController durationController = TextEditingController();
+  final TextEditingController rotationIntervalController = TextEditingController(text: '10');
 
   Timer? countdownTimer;
   int remainingSeconds = 0;
@@ -73,6 +74,7 @@ class _SessionPageState extends State<SessionPage>
   void dispose() {
     countdownTimer?.cancel();
     durationController.dispose();
+    rotationIntervalController.dispose();
     _fadeController.dispose();
     super.dispose();
   }
@@ -217,10 +219,11 @@ class _SessionPageState extends State<SessionPage>
       final result = await _sessionService.createSession(
         classId: int.parse(selectedSubjectId!),
         durationMinutes: durationMinutes,
-        classType: selectedClassType, // Pass class type
+        classType: selectedClassType,
         startTime: isPastSession && selectedStartTime != null
             ? selectedStartTime!.toUtc().toIso8601String()
             : null,
+        rotationInterval: int.tryParse(rotationIntervalController.text) ?? 10,
       );
 
       if (!mounted) return;
@@ -656,6 +659,61 @@ class _SessionPageState extends State<SessionPage>
                                   ),
                                 ),
                                 SizedBox(height: isMobile ? 16 : 24),
+
+                                // QR Rotation Interval (Only show if class type is QR)
+                                if (selectedClassType == 'qr') ...[
+                                  Text(
+                                    "QR Rotation Interval (seconds)",
+                                    style: TextStyle(
+                                      fontSize: isMobile ? 14 : 16,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.grey[700],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Container(
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(16),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withOpacity(0.05),
+                                          blurRadius: 10,
+                                          offset: const Offset(0, 4),
+                                        ),
+                                      ],
+                                    ),
+                                    child: TextField(
+                                      controller: rotationIntervalController,
+                                      keyboardType: TextInputType.number,
+                                      style: TextStyle(
+                                        fontSize: isMobile ? 14 : 16,
+                                      ),
+                                      decoration: InputDecoration(
+                                        prefixIcon: const Icon(
+                                          Icons.autorenew_outlined,
+                                          color: Color(0xFF007C91),
+                                        ),
+                                        hintText: "e.g. 10",
+                                        hintStyle: TextStyle(
+                                          color: Colors.grey[400],
+                                        ),
+                                        border: OutlineInputBorder(
+                                          borderRadius: BorderRadius.circular(16),
+                                          borderSide: BorderSide.none,
+                                        ),
+                                        contentPadding:
+                                            const EdgeInsets.symmetric(
+                                              horizontal: 20,
+                                              vertical: 18,
+                                            ),
+                                        filled: true,
+                                        fillColor: Colors.white,
+                                      ),
+                                    ),
+                                  ),
+                                  SizedBox(height: isMobile ? 16 : 24),
+                                ],
 
                                 // Past Session Toggle
                                 Container(

@@ -24,6 +24,7 @@ class SessionService {
     required int durationMinutes,
     String classType = 'qr',
     String? startTime,
+    int? rotationInterval,
   }) async {
     try {
       final token = await _getToken();
@@ -35,6 +36,7 @@ class SessionService {
           'duration_minutes': durationMinutes,
           'class_type': classType,
           if (startTime != null) 'start_time': startTime,
+          if (rotationInterval != null) 'rotation_interval': rotationInterval,
         },
         options: Options(headers: ApiConfig.authHeaders(token)),
       );
