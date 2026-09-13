@@ -11,6 +11,7 @@ import '../../services/attendance_service.dart';
 import '../../services/session_service.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/offline_indicator.dart';
+import '../../services/ble_mesh_service.dart';
 
 class QRScannerScreen extends StatefulWidget {
   const QRScannerScreen({super.key});
@@ -263,7 +264,12 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         return;
       }
 
-      final connectivityResults = await Connectivity().checkConnectivity();
+      List<ConnectivityResult> connectivityResults = [];
+      try {
+        connectivityResults = await Connectivity().checkConnectivity();
+      } catch (_) {
+        // Fallback to empty list (assume online) if connectivity plugin crashes
+      }
       final isNetworkOffline =
           connectivityResults.isEmpty ||
           connectivityResults.contains(ConnectivityResult.none);
@@ -271,9 +277,30 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       final isOfflineSession = data['is_offline'] == true;
       final isOffline = isNetworkOffline || isOfflineSession;
 
+      int bleHopCount;
+      int bleRssi;
+      try {
+        // STRICT BLE ENFORCEMENT: Verify presence via BLE Mesh FIRST
+        _showBleVerificationDialog();
+        final bleResult = await BleMeshService().startStudentScanAndRelay(
+            sessionId,
+            timeout: const Duration(seconds: 15));
+        bleHopCount = bleResult['hop_count'];
+        bleRssi = bleResult['rssi'];
+        // pop the verifying dialog
+        Navigator.of(context, rootNavigator: true).pop();
+      } catch (e) {
+        print("BLE mesh verification failed: $e");
+        // Pop the verifying dialog
+        Navigator.of(context, rootNavigator: true).pop();
+        _showError('BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.');
+        setState(() => isProcessing = false);
+        return;
+      }
+
       if (isOffline) {
         final timestamp = DateTime.now().toUtc().toIso8601String();
-        await SyncService().enqueueQRScan(sessionId, timestamp);
+        await SyncService().enqueueQRScan(sessionId, timestamp, bleHopCount: bleHopCount, bleRssi: bleRssi);
 
         setState(() {
           hasScanned = true;
@@ -286,7 +313,11 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         return;
       }
 
-      final result = await _attendanceService.markAttendance(sessionId);
+      final result = await _attendanceService.markAttendance(
+          sessionId,
+          bleHopCount: bleHopCount,
+          bleRssi: bleRssi
+      );
 
       if (mounted) {
         if (result['success']) {
@@ -324,14 +355,92 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       // Pause preview immediately so the user knows photo was taken
       await _cameraController!.pausePreview();
 
-      final connectivityResults = await Connectivity().checkConnectivity();
-      final isOffline =
+      List<ConnectivityResult> connectivityResults = [];
+      try {
+        connectivityResults = await Connectivity().checkConnectivity();
+      } catch (_) {
+        // Fallback to empty list (assume online) if connectivity plugin crashes
+      }
+      bool isOffline =
           connectivityResults.isEmpty ||
           connectivityResults.contains(ConnectivityResult.none);
 
+      // Fetch active sessions if online
+      String? sessionId;
+      if (!isOffline) {
+        List<Map<String, dynamic>> sessions = [];
+        try {
+          sessions = await _sessionService.getStudentActiveSessions();
+        } catch (e) {
+          final errorStr = e.toString().toLowerCase();
+          if (errorStr.contains('dioexception') || errorStr.contains('socketexception') || errorStr.contains('failed host lookup') || errorStr.contains('connection error')) {
+            isOffline = true;
+          } else {
+            _showError('Network/API Error: $e');
+            setState(() => isProcessing = false);
+            await _cameraController!.resumePreview();
+            return;
+          }
+        }
+
+        if (!isOffline) {
+          final patternSessions = sessions
+              .where((s) => s['class_type'] == 'pattern')
+              .toList();
+
+          if (patternSessions.isEmpty) {
+            _showError(
+              'No active pattern session found. Ask your teacher to start an pattern session.',
+            );
+            setState(() => isProcessing = false);
+            await _cameraController!.resumePreview();
+            return;
+          }
+
+          final session = patternSessions.first;
+
+          // Check if teacher has uploaded the reference image yet
+          if (session['has_reference_image'] == false) {
+            _showError(
+              'Teacher has not uploaded the board photo yet. Please wait and try again.',
+            );
+            setState(() => isProcessing = false);
+            await _cameraController!.resumePreview();
+            return;
+          }
+
+          sessionId = session['session_id'].toString();
+        }
+      }
+
+      // BLE MESH VERIFICATION (Enforced for Pattern mode too)
+      int bleHopCount;
+      int bleRssi;
+      
+      try {
+        _showBleVerificationDialog();
+        if (isOffline) {
+           final bleResult = await BleMeshService().startStudentScanAnySession(timeout: const Duration(seconds: 15));
+           bleHopCount = bleResult['hop_count'];
+           bleRssi = bleResult['rssi'];
+        } else {
+           final bleResult = await BleMeshService().startStudentScanAndRelay(sessionId!, timeout: const Duration(seconds: 15));
+           bleHopCount = bleResult['hop_count'];
+           bleRssi = bleResult['rssi'];
+        }
+        Navigator.of(context, rootNavigator: true).pop();
+      } catch (e) {
+        print("BLE mesh verification failed for pattern: $e");
+        Navigator.of(context, rootNavigator: true).pop();
+        _showError('BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.');
+        setState(() => isProcessing = false);
+        await _cameraController!.resumePreview();
+        return;
+      }
+
       if (isOffline) {
         final timestamp = DateTime.now().toUtc().toIso8601String();
-        await SyncService().enqueuePatternScan(imagePath, timestamp);
+        await SyncService().enqueuePatternScan(imagePath, timestamp, bleHopCount: bleHopCount, bleRssi: bleRssi);
         if (mounted) {
           setState(() => hasScanned = true);
           _showSuccessDialog(
@@ -341,49 +450,12 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         return;
       }
 
-      // Fetch active sessions
-      List<Map<String, dynamic>> sessions = [];
-      try {
-        sessions = await _sessionService.getStudentActiveSessions();
-      } catch (e) {
-        _showError('Network/API Error: $e');
-        setState(() => isProcessing = false);
-        await _cameraController!.resumePreview();
-        return;
-      }
-
-      final patternSessions = sessions
-          .where((s) => s['class_type'] == 'pattern')
-          .toList();
-
-      if (patternSessions.isEmpty) {
-        _showError(
-          'No active pattern session found. Ask your teacher to start an pattern session.',
-        );
-        setState(() => isProcessing = false);
-        await _cameraController!.resumePreview();
-        return;
-      }
-
-      final session = patternSessions.first;
-
-      // Check if teacher has uploaded the reference image yet
-      // has_reference_image is null on older backends - only block if explicitly false
-      if (session['has_reference_image'] == false) {
-        _showError(
-          'Teacher has not uploaded the board photo yet. Please wait and try again.',
-        );
-        setState(() => isProcessing = false);
-        await _cameraController!.resumePreview();
-        return;
-      }
-
-      final String sessionId = session['session_id'].toString();
-
       final result = await _attendanceService.verifyImage(
-        sessionId: sessionId,
+        sessionId: sessionId!,
         imagePath: imagePath,
         focalDistance: 2.0,
+        bleHopCount: bleHopCount,
+        bleRssi: bleRssi,
       );
 
       if (mounted) {
@@ -424,6 +496,36 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         margin: const EdgeInsets.all(16),
+      ),
+    );
+  }
+
+  void _showBleVerificationDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(height: 20),
+            const CircularProgressIndicator(color: Color(0xFF007C91)),
+            const SizedBox(height: 24),
+            const Text(
+              'Verifying location via BLE Mesh...',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Please stay close to the teacher or other students.',
+              textAlign: TextAlign.center,
+              style: TextStyle(fontSize: 14, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 10),
+          ],
+        ),
       ),
     );
   }

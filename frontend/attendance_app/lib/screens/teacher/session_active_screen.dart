@@ -8,6 +8,7 @@ import '../../widgets/pattern_painter.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/offline_indicator.dart';
+import '../../services/ble_mesh_service.dart';
 
 class SessionActiveScreen extends StatefulWidget {
   final Map<String, dynamic> sessionData;
@@ -45,6 +46,10 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     super.initState();
     _initializeSession();
     _startAutoRefresh();
+    
+    // Start BLE Broadcasting for this session
+    BleMeshService().startTeacherBroadcast(widget.sessionData['session_id'].toString());
+
     _syncSubscription = SyncService().onSyncComplete.listen((_) {
       if (mounted) {
         setState(() {
@@ -68,6 +73,7 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
 
   @override
   void dispose() {
+    BleMeshService().stopAll();
     _syncSubscription?.cancel();
     _connectivitySubscription?.cancel();
     _countdownTimer?.cancel();
@@ -183,6 +189,8 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
   }
 
   Future<void> _endSession() async {
+    BleMeshService().stopAll(); // Stop BLE broadcasting
+    
     final confirm = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(

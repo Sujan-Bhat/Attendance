@@ -406,16 +406,32 @@ class _TeacherAttendanceHistoryScreenState
     }
 
     if (errorMessage != null) {
-      return Center(child: _buildErrorState(isMobile));
+      return CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: _buildErrorState(isMobile)),
+          ),
+        ],
+      );
     }
 
     if (attendanceRecords.isEmpty) {
-      return Center(child: _buildEmptyState(isMobile));
+      return CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: _buildEmptyState(isMobile)),
+          ),
+        ],
+      );
     }
 
     return ListView.builder(
       padding: EdgeInsets.all(isMobile ? 16 : 20),
-      physics: const BouncingScrollPhysics(),
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
       itemCount: groupedData.length,
       itemBuilder: (context, index) {
         return FadeTransition(

@@ -42,7 +42,7 @@ class SyncService {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 6,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await db.execute('''
@@ -77,6 +77,22 @@ class SyncService {
             // Ignore if column already exists
           }
         }
+        if (oldVersion < 5) {
+          try {
+            await db.execute('ALTER TABLE offline_qr_queue ADD COLUMN ble_hop_count INTEGER');
+            await db.execute('ALTER TABLE offline_qr_queue ADD COLUMN ble_rssi INTEGER');
+          } catch (e) {
+            // Ignore if columns already exist
+          }
+        }
+        if (oldVersion < 6) {
+          try {
+            await db.execute('ALTER TABLE offline_queue ADD COLUMN ble_hop_count INTEGER');
+            await db.execute('ALTER TABLE offline_queue ADD COLUMN ble_rssi INTEGER');
+          } catch (e) {
+            // Ignore if columns already exist
+          }
+        }
       },
       onCreate: (db, version) async {
         await db.execute('''
@@ -84,6 +100,8 @@ class SyncService {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             image_path TEXT NOT NULL,
             timestamp TEXT NOT NULL,
+            ble_hop_count INTEGER,
+            ble_rssi INTEGER,
             status TEXT DEFAULT 'pending'
           )
         ''');
@@ -105,6 +123,8 @@ class SyncService {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             session_id TEXT NOT NULL,
             timestamp TEXT NOT NULL,
+            ble_hop_count INTEGER,
+            ble_rssi INTEGER,
             status TEXT DEFAULT 'pending'
           )
         ''');
@@ -152,11 +172,13 @@ class SyncService {
     debugPrint('Queued offline session ${sessionData['id']}');
   }
 
-  Future<void> enqueuePatternScan(String imagePath, String timestamp) async {
+  Future<void> enqueuePatternScan(String imagePath, String timestamp, {int? bleHopCount, int? bleRssi}) async {
     final item = {
       'id': DateTime.now().millisecondsSinceEpoch,
       'image_path': imagePath,
       'timestamp': timestamp,
+      'ble_hop_count': bleHopCount,
+      'ble_rssi': bleRssi,
       'status': 'pending',
     };
 
@@ -372,10 +394,15 @@ class SyncService {
             }
           }
 
+          final bleHopCount = record['ble_hop_count'] as int?;
+          final bleRssi = record['ble_rssi'] as int?;
+
           try {
             final result = await _attendanceService.syncOfflinePattern(
               imagePath: imagePath,
               timestamp: timestamp,
+              bleHopCount: bleHopCount,
+              bleRssi: bleRssi,
             );
 
             if (result['success']) {
@@ -441,11 +468,16 @@ class SyncService {
             continue;
           }
 
+          final bleHopCount = record['ble_hop_count'] as int?;
+          final bleRssi = record['ble_rssi'] as int?;
+
           try {
             final result = await _attendanceService.markAttendance(
               sessionId,
               isOfflineSync: true,
               timestamp: timestamp,
+              bleHopCount: bleHopCount,
+              bleRssi: bleRssi,
             );
             if (result['success']) {
               if (kIsWeb) {
@@ -480,11 +512,13 @@ class SyncService {
     }
   }
 
-  Future<void> enqueueQRScan(String sessionId, String timestamp) async {
+  Future<void> enqueueQRScan(String sessionId, String timestamp, {int? bleHopCount, int? bleRssi}) async {
     final item = {
       'id': DateTime.now().millisecondsSinceEpoch,
       'session_id': sessionId,
       'timestamp': timestamp,
+      'ble_hop_count': bleHopCount,
+      'ble_rssi': bleRssi,
       'status': 'pending',
     };
 

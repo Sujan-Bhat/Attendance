@@ -5,6 +5,8 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   app_links
   connectivity_plus
+  flutter_ble_peripheral
+  flutter_blue_plus_winrt
   flutter_secure_storage_windows
   permission_handler_windows
   share_plus

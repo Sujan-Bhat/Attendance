@@ -1,10 +1,10 @@
 import 'dart:async';
-import 'dart:js_interop';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:web/web.dart' as web;
+
+import '../../../utils/web_utils_stub.dart' if (dart.library.js_interop) '../../../utils/web_utils.dart';
 
 import '../../../services/bulk_students_service.dart';
 import '../../../services/class_service.dart';
@@ -403,13 +403,7 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
       final data = await rootBundle.load('assets/templates/student_add_template.xlsx');
       final bytes = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
       if (kIsWeb) {
-        final blob = web.Blob([bytes.toJS].toJS);
-        final url = web.URL.createObjectURL(blob);
-        final anchor = web.HTMLAnchorElement()
-          ..href = url
-          ..download = 'student_add_template.xlsx';
-        anchor.click();
-        web.URL.revokeObjectURL(url);
+        downloadWeb(bytes, 'student_add_template.xlsx');
       } else {
         await FilePicker.platform.saveFile(
           fileName: 'student_add_template.xlsx',
@@ -437,49 +431,6 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
   }
 
   Future<void> _pickFile() async {
-    if (kIsWeb) {
-      final input = web.HTMLInputElement()
-        ..type = 'file'
-        ..accept = '.xlsx'
-        ..style.display = 'none';
-      web.document.body?.append(input);
-      final picked = Completer<web.File?>();
-      final cancelSub =
-          web.EventStreamProviders.focusEvent.forTarget(web.window).listen((_) {
-        Future<void>.delayed(const Duration(milliseconds: 500)).then((_) {
-          if (!picked.isCompleted) picked.complete(null);
-        });
-      });
-      input.onChange.first.then((_) => picked.complete(input.files?.item(0)));
-      input.click();
-      web.File? file;
-      try {
-        file = await picked.future;
-      } finally {
-        await cancelSub.cancel();
-        input.remove();
-      }
-      if (file == null || !mounted) return;
-      final selected = file;
-      try {
-        final buffer = await selected.arrayBuffer().toDart;
-        final bytes = buffer.toDart.asUint8List();
-        if (!mounted) return;
-        setState(() {
-          _fileName = selected.name;
-          _fileBytes = bytes;
-          _batchError = null;
-        });
-      } catch (_) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Could not open that file'), backgroundColor: Colors.red),
-          );
-        }
-      }
-      return;
-    }
-
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,

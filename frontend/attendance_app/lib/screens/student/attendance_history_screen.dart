@@ -452,11 +452,27 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     }
 
     if (errorMessage != null) {
-      return Center(child: _buildErrorState(isMobile));
+      return CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: _buildErrorState(isMobile)),
+          ),
+        ],
+      );
     }
 
     if (attendanceRecords.isEmpty) {
-      return Center(child: _buildEmptyState(isMobile));
+      return CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(child: _buildEmptyState(isMobile)),
+          ),
+        ],
+      );
     }
 
     return selectedView == 'Timeline'
@@ -468,18 +484,27 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
     final records = filteredRecords;
 
     if (records.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Text(
-            'No $selectedFilter records found',
-            style: const TextStyle(color: Colors.white, fontSize: 16),
+      return CustomScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        slivers: [
+          SliverFillRemaining(
+            hasScrollBody: false,
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  'No $selectedFilter records found',
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
       );
     }
 
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
       padding: const EdgeInsets.all(16),
       itemCount: records.length,
       itemBuilder: (context, index) {
@@ -501,6 +526,7 @@ class _AttendanceHistoryScreenState extends State<AttendanceHistoryScreen> {
 
   Widget _buildClassGroupedView(bool isMobile) {
     return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
       padding: const EdgeInsets.all(16),
       itemCount: groupedRecords.length,
       itemBuilder: (context, index) {
