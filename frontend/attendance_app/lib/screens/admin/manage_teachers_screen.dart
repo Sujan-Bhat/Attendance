@@ -151,25 +151,6 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (isMobile)
-                Builder(
-                  builder: (context) => Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.2),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: IconButton(
-                      icon: const Icon(
-                        Icons.menu_rounded,
-                        color: Colors.white,
-                        size: 24,
-                      ),
-                      onPressed: () => Scaffold.of(context).openDrawer(),
-                      tooltip: 'Menu',
-                    ),
-                  ),
-                ),
-              if (isMobile) const SizedBox(width: 8),
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),

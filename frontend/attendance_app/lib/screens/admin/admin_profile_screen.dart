@@ -345,6 +345,7 @@ class _AdminProfileScreenState extends State<AdminProfileScreen>
 
     return AdminWebLayout(
       currentRoute: 'Profile',
+      showMobileAppBar: false,
       mobileChild: mobileChild,
       desktopBody: mainContent,
     );

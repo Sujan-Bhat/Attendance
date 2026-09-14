@@ -6,11 +6,17 @@ class SemesterClassesScreen extends StatefulWidget {
   final String semesterDisplay;
   final int totalEnrollments;
 
+  /// When true, the screen lists students that no other admin flow can reach
+  /// (blank or missing profile semester, or no StudentProfile row) instead of
+  /// the students of a concrete semester. Deletion is disabled in this mode.
+  final bool showUnassignedOnly;
+
   const SemesterClassesScreen({
     super.key,
     required this.semesterLabel,
     required this.semesterDisplay,
     required this.totalEnrollments,
+    this.showUnassignedOnly = false,
   });
 
   @override
@@ -67,6 +73,19 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
       ]);
       final data = results[0];
       final unassignedData = results[1];
+
+      if (widget.showUnassignedOnly) {
+        final reachable = List<Map<String, dynamic>>.from(
+          unassignedData['unreachable'] ?? [],
+        );
+        if (mounted) {
+          setState(() {
+            _students = reachable;
+            _isLoading = false;
+          });
+        }
+        return;
+      }
 
       final unassigned = List<Map<String, dynamic>>.from(
         unassignedData['students'] ?? [],
@@ -156,7 +175,7 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
           ],
         ),
         actions: [
-          if (_students.isNotEmpty)
+          if (_students.isNotEmpty && !widget.showUnassignedOnly)
             IconButton(
               icon: const Icon(Icons.delete_sweep_outlined, color: Colors.red, size: 22),
               onPressed: _showDeleteAllDialog,
@@ -246,7 +265,7 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
           controller: _searchController,
           onChanged: (v) => setState(() => _searchQuery = v),
           decoration: InputDecoration(
-            hintText: 'Search by name, email or roll no',
+            hintText: 'Search by name or email',
             hintStyle: TextStyle(color: Colors.black.withValues(alpha: 0.3), fontSize: 14),
             prefixIcon: const Icon(Icons.search, color: Color(0xFF007C91)),
             filled: true,

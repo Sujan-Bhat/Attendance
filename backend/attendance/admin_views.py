@@ -221,8 +221,27 @@ def admin_unassigned_students(request):
             'semester': profile.semester,
         })
 
+    # Also surface students that no other admin flow can reach: those with a
+    # blank/missing profile semester, or no StudentProfile row at all. Without
+    # this they are invisible in the Manage Students flow.
+    reachable_ids = {s['id'] for s in result}
+    unreachable = []
+    enrolled_ids = set(
+        Enrollment.objects.values_list('student_id', flat=True).distinct()
+    )
+    for u in User.objects.filter(role='student').order_by('username'):
+        if u.id in enrolled_ids or u.id in reachable_ids:
+            continue
+        unreachable.append({
+            'id': u.id,
+            'username': u.username,
+            'email': u.email,
+            'semester': '',
+        })
+
     return Response({
         'students': result,
+        'unreachable': unreachable,
         'total': len(result),
     })
 

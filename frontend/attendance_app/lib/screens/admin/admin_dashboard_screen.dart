@@ -89,6 +89,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     ),
   ];
 
+  /// Display name with robust fallback: first_name -> username -> 'Admin'.
+  /// Treats empty strings as missing (unlike a bare ?? operator).
+  String displayName(Map<String, dynamic>? data) {
+    final first = (data?['first_name'] ?? '').toString().trim();
+    if (first.isNotEmpty) return first;
+    final username = (data?['username'] ?? '').toString().trim();
+    return username.isNotEmpty ? username : 'Admin';
+  }
+
   Future<void> _loadUserData({bool forceRefresh = false}) async {
     final cacheValid =
         _cachedUserData != null &&
@@ -98,7 +107,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     if (!forceRefresh && cacheValid) {
       if (!mounted) return;
       setState(() {
-        _adminName = _cachedUserData!['first_name'] ?? 'Admin';
+        _adminName = displayName(_cachedUserData!);
         _username = _cachedUserData!['username'] ?? '';
         _isLoading = false;
       });
@@ -114,6 +123,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         _classService.getAdminStats(),
       ]);
 
+
       if (!mounted) return;
       final userData = results[0];
       final stats = results[1]!;
@@ -121,7 +131,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       setState(() {
         _cachedUserData = userData;
         _lastFetch = DateTime.now();
-        _adminName = userData?['first_name'] ?? 'Admin';
+        _adminName = displayName(userData);
         _username = userData?['username'] ?? '';
         _studentCount =
             int.tryParse(stats['students_count']?.toString() ?? '') ?? 0;
@@ -375,7 +385,7 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Welcome, $_username',
+                      'Welcome, ${_username.isEmpty ? _adminName : _username}',
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
