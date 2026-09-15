@@ -336,7 +336,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
 
       if (!mounted) return;
 
-      if (result == true) {
+      if (result.success) {
         // Get user role from stored data
         final role = await _authService.getUserRole();
 
@@ -361,7 +361,9 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             break;
         }
       } else {
-        _showErrorSnackBar('Invalid email or password');
+        // Server-provided reason (e.g. "Your account has been blocked by
+        // the administrator.") or a generic fallback.
+        _showErrorSnackBar(result.errorMessage ?? 'Invalid email or password');
       }
     } on DioException catch (e) {
       if (e.response?.statusCode == 401) {

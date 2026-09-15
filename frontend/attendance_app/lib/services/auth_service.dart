@@ -7,10 +7,24 @@ import '../config/api_config.dart';
 import '../core/api_client.dart';
 import 'storage_service.dart';
 
+class LoginResult {
+  final bool success;
+  final String? errorMessage;
+
+  const LoginResult({required this.success, this.errorMessage});
+
+  factory LoginResult.ok() => const LoginResult(success: true);
+  factory LoginResult.failed([String? message]) =>
+      LoginResult(success: false, errorMessage: message);
+}
+
 class AuthService {
   final Dio _dio = ApiClient().dio;
 
-  Future<bool> login(String email, String password) async {
+  /// Attempts login and returns a [LoginResult] so callers can surface
+  /// server-specific reasons (e.g. "account blocked by administrator")
+  /// instead of a generic failure.
+  Future<LoginResult> login(String email, String password) async {
     try {
       // Step 1: Make POST request to /auth/token/ endpoint(Django backend)
       final response = await _dio.post(
@@ -37,23 +51,50 @@ class AuthService {
         } catch (e) {
           print('Error fetching user data: $e');
         }
-        return true;
+        return LoginResult.ok();
       }
-      return false;
+      return LoginResult.failed();
     } on DioException catch (e) {
       print(
         'Login error [${e.response?.statusCode}]: ${e.response?.data ?? e.message}',
       );
       print('Exact error: ${e.error}');
       print('Type: ${e.type}');
-      return false;
+
+      // Django typically returns 401 for both bad credentials and blocked
+      // accounts; the server sends a human-readable `detail` we can show.
+      final data = e.response?.data;
+      String? detail;
+      if (data is Map && data['detail'] is String) {
+        detail = data['detail'] as String;
+      } else if (data is Map && data['error'] is String) {
+        detail = data['error'] as String;
+      }
+
+      if (e.response?.statusCode == 401) {
+        final msg = detail ?? 'Invalid email or password';
+        return LoginResult.failed(msg);
+      }
+      if (e.response?.statusCode == 404) {
+        return LoginResult.failed('Server not found');
+      }
+      if (e.response?.statusCode == 500) {
+        return LoginResult.failed('Server error. Please try again later');
+      }
+      if (e.type == DioExceptionType.connectionTimeout) {
+        return LoginResult.failed('Connection timeout');
+      }
+      if (e.type == DioExceptionType.connectionError) {
+        return LoginResult.failed('Cannot connect to server');
+      }
+      return LoginResult.failed(detail ?? 'Login failed. Please try again.');
     } catch (e) {
       print('Unexpected login error: $e');
       rethrow;
     }
   }
 
-  Future<bool> signUp({
+  Future<LoginResult> signUp({
     required String username,
     required String email,
     required String password,
@@ -73,13 +114,15 @@ class AuthService {
         },
       );
       // Success if status code is 201 Created
-      return response.statusCode == 201;
+      return response.statusCode == 201
+          ? LoginResult.ok()
+          : LoginResult.failed();
     } on DioException catch (e) {
       print('Signup error: ${e.response?.data ?? e.message}');
-      return false;
+      return LoginResult.failed();
     } catch (e) {
       print('Signup error: $e');
-      return false;
+      return LoginResult.failed();
     }
   }
 

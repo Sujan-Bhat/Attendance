@@ -441,7 +441,7 @@ class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
 
     // 3. Call AuthService.signUp()
     try {
-      final success = await AuthService().signUp(
+      final result = await AuthService().signUp(
         username: _usernameController.text.trim(),
         email: _emailController.text.trim(),
         password: _passwordController.text.trim(),
@@ -451,14 +451,15 @@ class _SignUpPageState extends State<SignUpPage> with TickerProviderStateMixin {
 
       if (!mounted) return;
 
-      if (success) {
+      if (result.success) {
         _showSuccessSnackBar('Account created successfully!');
         await Future.delayed(const Duration(seconds: 1));
         if (mounted) {
           Navigator.pushReplacementNamed(context, '/login');
         }
       } else {
-        _showErrorSnackBar('Sign up failed. Please try again');
+        _showErrorSnackBar(
+            result.errorMessage ?? 'Sign up failed. Please try again');
       }
     } catch (e) {
       _showErrorSnackBar('An error occurred: ${e.toString()}');

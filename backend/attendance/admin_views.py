@@ -174,6 +174,7 @@ def admin_semester_students(request, semester):
                     'id': student.id,
                     'username': student.username,
                     'email': student.email,
+                    'is_active': student.is_active,
                     'classes': [],
                 }
             students_map[student.id]['classes'].append({
@@ -218,6 +219,7 @@ def admin_unassigned_students(request):
             'id': profile.student.id,
             'username': profile.student.username,
             'email': profile.student.email,
+            'is_active': profile.student.is_active,
             'semester': profile.semester,
         })
 
@@ -236,6 +238,7 @@ def admin_unassigned_students(request):
             'id': u.id,
             'username': u.username,
             'email': u.email,
+            'is_active': u.is_active,
             'semester': '',
         })
 
@@ -283,6 +286,7 @@ def admin_teachers_list(request):
             'id': teacher.id,
             'username': teacher.username,
             'email': teacher.email,
+            'is_active': teacher.is_active,
             'date_joined': teacher.date_joined,
             'class_count': teacher.class_count,
             'classes': classes_list,
@@ -422,6 +426,19 @@ def admin_toggle_user_access(request, user_id):
         target = User.objects.get(id=user_id)
     except User.DoesNotExist:
         return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    # Guards: an admin must not be able to lock themselves out, and
+    # superuser accounts are protected from casual blocking.
+    if target.id == user.id:
+        return Response(
+            {'error': 'You cannot block or unblock your own account'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+    if target.is_superuser:
+        return Response(
+            {'error': 'Superuser accounts cannot be blocked here'},
+            status=status.HTTP_403_FORBIDDEN
+        )
 
     target.is_active = not target.is_active
     target.save(update_fields=['is_active'])

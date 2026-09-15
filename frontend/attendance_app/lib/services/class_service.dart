@@ -702,25 +702,34 @@ class ClassService {
     }
   }
 
-  /// Admin: Toggle user access (is_active)
+  /// Admin: Block/unblock a user by toggling `is_active`. A blocked user
+  /// cannot log in, and their existing JWTs stop working immediately
+  /// (SimpleJWT rejects inactive users on every request).
+  ///
+  /// Returns the updated user map (`id`, `username`, `email`, `role`,
+  /// `is_active`). Throws on any failure so callers can show the reason.
   Future<Map<String, dynamic>> toggleUserAccess(int userId) async {
-    try {
-      final token = await _getToken();
+    final token = await _getToken();
 
-      final response = await _dio.patch(
-        '/admin/users/$userId/toggle-access/',
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
+    final response = await _dio.patch(
+      '/admin/users/$userId/toggle-access/',
+      options: Options(headers: {'Authorization': 'Bearer $token'}),
+    );
 
-      if (response.statusCode == 200) {
-        return response.data;
-      }
-
-      return {};
-    } catch (e) {
-      print('Error toggling user access: $e');
-      return {};
+    if (response.statusCode == 200) {
+      return Map<String, dynamic>.from(response.data as Map);
     }
+    throw Exception('Failed to toggle user access');
+  }
+
+  /// Admin: Block a user (prevent login + invalidate their sessions).
+  Future<Map<String, dynamic>> blockUser(int userId) async {
+    return toggleUserAccess(userId);
+  }
+
+  /// Admin: Unblock a previously blocked user.
+  Future<Map<String, dynamic>> unblockUser(int userId) async {
+    return toggleUserAccess(userId);
   }
 
   Future<Map<String, dynamic>> joinClass(String classCode) async {

@@ -1,4 +1,5 @@
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import AuthenticationFailed
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
 from django.contrib.auth import get_user_model
@@ -39,7 +40,18 @@ class MyTokenObtainPairSerializer(TokenObtainPairSerializer):
 
     def validate(self, attrs):
         """Authenticate user and return tokens + user data"""
-        #Step 1: Validate credentials
+        # Step 0: Blocked accounts get an explicit, honest error instead of
+        # the misleading default "No active account found with the given
+        # credentials".
+        identifier = attrs.get(User.USERNAME_FIELD, '')
+        if identifier and User.objects.filter(
+            **{f'{User.USERNAME_FIELD}__iexact': identifier, 'is_active': False}
+        ).exists():
+            raise AuthenticationFailed(
+                'Your account has been blocked by the administrator.',
+                code='account_blocked',
+            )
+        # Step 1: Validate credentials
         data = super().validate(attrs)
         # Add user data to response
         data['user'] = UserSerializer(self.user).data

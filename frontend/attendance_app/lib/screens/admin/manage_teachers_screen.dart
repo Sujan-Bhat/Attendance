@@ -7,6 +7,8 @@ abstract class _AppColors {
   static const tealDark = Color(0xFF007C91);
   static const teal = Color(0xFF0097A7);
   static const textMuted = Color(0xFF6B7280);
+  static const blockedRed = Color(0xFFC62828);
+  static const blockedBg = Color(0xFFFDE8E8);
 }
 
 class ManageTeachersScreen extends StatefulWidget {
@@ -56,6 +58,101 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
     if (raw is int) return raw;
     if (raw is String) return int.tryParse(raw);
     return null;
+  }
+
+  /// A blocked teacher cannot log in; SimpleJWT rejects inactive users on
+  /// every request, so this also ends any live session.
+  bool _isBlocked(Map<String, dynamic> teacher) =>
+      teacher['is_active'] == false;
+
+  Future<void> _toggleBlock(Map<String, dynamic> teacher) async {
+    final teacherId = _teacherIdOf(teacher);
+    if (teacherId == null) return;
+
+    final name = teacher['username'] ?? 'Unknown';
+    final isBlocking = !_isBlocked(teacher);
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Text(
+          isBlocking ? 'Block Teacher' : 'Unblock Teacher',
+          style: const TextStyle(fontWeight: FontWeight.bold),
+        ),
+        content: Text(
+          isBlocking
+              ? 'Block $name from logging in?\n\n'
+                  'Their login will be rejected immediately and any active '
+                  'session will stop working. Their classes are not affected '
+                  'and you can unblock them at any time.'
+              : 'Allow $name to log in again?',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: isBlocking ? _AppColors.blockedRed : _AppColors.tealDark,
+              foregroundColor: Colors.white,
+            ),
+            child: Text(isBlocking ? 'Block' : 'Unblock'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final result = await _classService.toggleUserAccess(teacherId);
+      if (!mounted) return;
+      final nowBlocked = result['is_active'] == false;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            nowBlocked
+                ? '$name blocked \u2014 they can no longer log in'
+                : '$name unblocked \u2014 they can log in again',
+          ),
+          backgroundColor: _AppColors.tealDark,
+        ),
+      );
+      _loadTeachers();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            e.toString().contains('Superuser')
+                ? 'Superuser accounts cannot be blocked here'
+                : 'Could not update user access',
+          ),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  Widget _buildStatusChip(bool blocked) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: blocked ? _AppColors.blockedBg : const Color(0xFFE8F5E9),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        blocked ? 'Blocked' : 'Active',
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w600,
+          color: blocked ? _AppColors.blockedRed : const Color(0xFF2E7D32),
+        ),
+      ),
+    );
   }
 
   Future<void> _loadTeachers() async {
@@ -569,6 +666,17 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
               ),
             ),
           ),
+          SizedBox(
+            width: 70,
+            child: Text(
+              'Status',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
           SizedBox(width: 48),
         ],
       ),
@@ -623,6 +731,10 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
                     overflow: TextOverflow.ellipsis,
                   ),
                 ),
+              ),
+              SizedBox(
+                width: 70,
+                child: _buildStatusChip(_isBlocked(teacher)),
               ),
               Expanded(
                 child: Padding(
@@ -689,6 +801,19 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
                 icon: const Icon(Icons.swap_horiz, color: _AppColors.tealDark, size: 20),
                 onPressed: () => _showReassignTeacherDialog(teacher),
                 tooltip: 'Reassign classes',
+              ),
+              IconButton(
+                icon: Icon(
+                  _isBlocked(teacher)
+                      ? Icons.block_rounded
+                      : Icons.lock_open_rounded,
+                  color: _isBlocked(teacher)
+                      ? _AppColors.blockedRed
+                      : _AppColors.tealDark,
+                  size: 20,
+                ),
+                onPressed: () => _toggleBlock(teacher),
+                tooltip: _isBlocked(teacher) ? 'Unblock login' : 'Block login',
               ),
               IconButton(
                 icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
@@ -808,10 +933,28 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
                             color: _AppColors.textMuted,
                           ),
                         ),
+                        const SizedBox(height: 6),
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: _buildStatusChip(_isBlocked(teacher)),
+                        ),
                       ],
                     ),
                   ),
                   const SizedBox(width: 4),
+                  IconButton(
+                    icon: Icon(
+                      _isBlocked(teacher)
+                          ? Icons.block_rounded
+                          : Icons.lock_open_rounded,
+                      color: _isBlocked(teacher)
+                          ? _AppColors.blockedRed
+                          : _AppColors.tealDark,
+                      size: 20,
+                    ),
+                    onPressed: () => _toggleBlock(teacher),
+                    tooltip: _isBlocked(teacher) ? 'Unblock login' : 'Block login',
+                  ),
                   IconButton(
                     icon: const Icon(Icons.edit_outlined, color: _AppColors.tealDark, size: 20),
                     onPressed: () => _showEditTeacherDialog(teacher),
