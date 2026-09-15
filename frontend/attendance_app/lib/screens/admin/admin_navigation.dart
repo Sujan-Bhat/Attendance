@@ -5,12 +5,14 @@ import 'manage_classes_screen.dart';
 import 'manage_students_screen.dart';
 import 'manage_teachers_screen.dart';
 import 'admin_profile_screen.dart';
+import 'attendance_management_screen.dart';
 
 const List<AdminNavItem> kAdminNavItems = [
   AdminNavItem(title: 'Dashboard', icon: Icons.dashboard_rounded),
   AdminNavItem(title: 'Manage Students', icon: Icons.people_alt_rounded),
   AdminNavItem(title: 'Manage Teachers', icon: Icons.person_rounded),
   AdminNavItem(title: 'Manage Classes', icon: Icons.class_rounded),
+  AdminNavItem(title: 'Attendance Management', icon: Icons.analytics_rounded),
   AdminNavItem(title: 'Profile', icon: Icons.person_outline_rounded),
 ];
 
@@ -42,6 +44,8 @@ Widget _pageForRoute(String title) {
       return const ManageTeachersScreen();
     case 'Manage Classes':
       return const ManageClassesScreen();
+    case 'Attendance Management':
+      return const AttendanceManagementScreen();
     case 'Profile':
       return const AdminProfileScreen();
     default:

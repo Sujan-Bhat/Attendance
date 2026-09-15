@@ -85,8 +85,8 @@ child: AnimatedBuilder(
                   animation: _scaleAnimation,
                   builder: (context, child) {
                     final iconCircle = Container(
-                      width: isCompact ? 52 : 68,
-                      height: isCompact ? 52 : 68,
+                      width: isCompact ? 56 : 68,
+                      height: isCompact ? 56 : 68,
                       padding: EdgeInsets.all(isCompact ? 10 : 12),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.25),
@@ -101,22 +101,19 @@ child: AnimatedBuilder(
                         child: Icon(
                           widget.icon,
                           color: widget.color,
-                          size: isCompact ? 24 : 30,
+                          size: isCompact ? 26 : 30,
                         ),
                       ),
                     );
 
                     final textColumn = Column(
-                      crossAxisAlignment: isCompact
-                          ? CrossAxisAlignment.center
-                          : CrossAxisAlignment.start,
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         Text(
                           widget.title,
-                          maxLines: isCompact ? 2 : 1,
+                          maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          textAlign: isCompact ? TextAlign.center : null,
                           style: TextStyle(
                             color: Colors.black,
                             fontSize: isCompact ? 16 : 20,
@@ -124,12 +121,11 @@ child: AnimatedBuilder(
                             fontWeight: FontWeight.w700,
                           ),
                         ),
-                        SizedBox(height: isCompact ? 4 : 6),
+                        SizedBox(height: isCompact ? 3 : 6),
                         Text(
                           widget.subtitle,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          textAlign: isCompact ? TextAlign.center : null,
                           style: TextStyle(
                             color: Colors.black,
                             fontSize: isCompact ? 12 : 14,
@@ -139,27 +135,21 @@ child: AnimatedBuilder(
                       ],
                     );
 
-                    final Widget inner = isCompact
-                        ? Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              iconCircle,
-                              const SizedBox(height: 12),
-                              textColumn,
-                            ],
-                          )
-                        : Row(
-                            crossAxisAlignment: CrossAxisAlignment.center,
-                            children: [
-                              iconCircle,
-                              const SizedBox(width: 16),
-                              Expanded(child: textColumn),
-                              if (widget.trailing != null) ...[
-                                const SizedBox(width: 8),
-                                widget.trailing!,
-                              ],
-                            ],
-                          );
+                    // Both layouts are horizontal (icon left, text right);
+                    // compact just uses tighter metrics so phones get a
+                    // short list-style card instead of an oversized square.
+                    final Widget inner = Row(
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        iconCircle,
+                        SizedBox(width: isCompact ? 16 : 14),
+                        Expanded(child: textColumn),
+                        if (widget.trailing != null) ...[
+                          const SizedBox(width: 8),
+                          widget.trailing!,
+                        ],
+                      ],
+                    );
 
                     return Transform.translate(
                       offset: Offset(0, _translateAnimation.value),
@@ -167,8 +157,8 @@ child: AnimatedBuilder(
                         scale: _scaleAnimation.value,
                         child: Container(
                           padding: EdgeInsets.symmetric(
-                            horizontal: isCompact ? 16 : 32,
-                            vertical: isCompact ? 16 : 24,
+                            horizontal: isCompact ? 18 : 32,
+                            vertical: isCompact ? 22 : 24,
                           ),
                           decoration: ShapeDecoration(
                             gradient: LinearGradient(

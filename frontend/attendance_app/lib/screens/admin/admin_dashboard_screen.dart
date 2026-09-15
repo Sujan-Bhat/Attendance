@@ -81,6 +81,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       gradient: [Color(0xFF9C8BFF), Colors.white],
     ),
     _DashboardCard(
+      title: 'Attendance Management',
+      subtitle: 'Session-wise attendance by class',
+      icon: Icons.analytics_rounded,
+      color: Color(0xFF2F80ED),
+      gradient: [Color(0xFF5B9DF9), Colors.white],
+    ),
+    _DashboardCard(
       title: 'Profile',
       subtitle: 'View your Profile',
       icon: Icons.person_outline_rounded,
@@ -303,9 +310,35 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
   Widget _buildDashboardGrid(int crossAxisCount, bool isMobile) {
     final isCompact = isMobile || crossAxisCount == 2;
-    final childAspectRatio = isMobile
-        ? 0.96
-        : (crossAxisCount == 2 ? 1.22 : 1.6);
+
+    // Phone: plain column of full-width horizontal cards — natural height,
+    // no oversized near-square grid cells.
+    if (crossAxisCount == 1) {
+      return Column(
+        children: [
+          for (final card in _cards)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: AdminAnimatedCard(
+                title: card.title,
+                subtitle: card.subtitle,
+                icon: card.icon,
+                color: card.color,
+                gradient: card.gradient,
+                compact: true,
+                onTap: () => _handleCardTap(card.title),
+                trailing: Icon(
+                  Icons.chevron_right_rounded,
+                  color: card.color,
+                  size: 24,
+                ),
+              ),
+            ),
+        ],
+      );
+    }
+
+    final childAspectRatio = crossAxisCount == 2 ? 3.0 : 1.6;
 
     return GridView.builder(
       itemCount: _cards.length,
@@ -313,13 +346,13 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       shrinkWrap: true,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
-        mainAxisSpacing: isCompact ? 18 : 42,
+        mainAxisSpacing: isCompact ? 14 : 42,
         crossAxisSpacing: isCompact ? 18 : 55,
         childAspectRatio: childAspectRatio,
       ),
       itemBuilder: (context, idx) {
         final card = _cards[idx];
-        final animated = AdminAnimatedCard(
+        return AdminAnimatedCard(
           title: card.title,
           subtitle: card.subtitle,
           icon: card.icon,
@@ -327,16 +360,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           gradient: card.gradient,
           compact: isCompact,
           onTap: () => _handleCardTap(card.title),
+          trailing: isCompact
+              ? Icon(Icons.chevron_right_rounded, color: card.color, size: 24)
+              : null,
         );
-        if (isCompact) {
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
-              child: animated,
-            ),
-          );
-        }
-        return animated;
       },
     );
   }

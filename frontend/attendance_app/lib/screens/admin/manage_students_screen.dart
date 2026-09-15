@@ -408,9 +408,38 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
 
   Widget _buildSemesterGrid(int crossAxisCount, bool isMobile) {
     final isCompact = isMobile || crossAxisCount == 2;
-    final childAspectRatio = isMobile
-        ? 0.96
-        : (crossAxisCount == 2 ? 1.22 : 1.6);
+
+    Widget card(_SemesterCard semester) {
+      return AdminAnimatedCard(
+        title: semester.semesterDisplay,
+        subtitle: '${semester.studentCount} Students',
+        icon: Icons.school_rounded,
+        color: semester.color,
+        gradient: semester.gradient,
+        compact: isCompact,
+        onTap: () => _openSemester(semester),
+        trailing: Icon(
+          isCompact
+              ? Icons.chevron_right_rounded
+              : Icons.arrow_forward_ios_rounded,
+          color: semester.color,
+          size: isCompact ? 24 : 20,
+        ),
+      );
+    }
+
+    // Phone: column of full-width horizontal cards at natural height.
+    if (crossAxisCount == 1) {
+      return Column(
+        children: [
+          for (final semester in _semesters)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: card(semester),
+            ),
+        ],
+      );
+    }
 
     return GridView.builder(
       itemCount: _semesters.length,
@@ -418,35 +447,11 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
       shrinkWrap: true,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
-        mainAxisSpacing: isMobile ? 18 : 42,
-        crossAxisSpacing: isMobile ? 18 : 55,
-        childAspectRatio: childAspectRatio,
+        mainAxisSpacing: isCompact ? 14 : 42,
+        crossAxisSpacing: isCompact ? 18 : 55,
+        childAspectRatio: isCompact ? 3.0 : 1.6,
       ),
-      itemBuilder: (context, idx) {
-        final semester = _semesters[idx];
-        final animated = AdminAnimatedCard(
-          title: semester.semesterDisplay,
-          subtitle: '${semester.studentCount} Students',
-          icon: Icons.school_rounded,
-          color: semester.color,
-          gradient: semester.gradient,
-          onTap: () => _openSemester(semester),
-          trailing: Icon(
-            Icons.arrow_forward_ios_rounded,
-            color: semester.color,
-            size: 20,
-          ),
-        );
-        if (isCompact) {
-          return Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 340),
-              child: animated,
-            ),
-          );
-        }
-        return animated;
-      },
+      itemBuilder: (context, idx) => card(_semesters[idx]),
     );
   }
 

@@ -71,6 +71,8 @@ from attendance.admin_views import (
     admin_update_student,
     admin_delete_student,
     admin_delete_all_students,
+    admin_attendance_semesters,
+    admin_attendance_by_semester,
 )
 
 FLUTTER_WEB_DIR = os.path.join(settings.BASE_DIR, 'flutter_web')
@@ -172,6 +174,10 @@ urlpatterns = [
     path('api/v1/admin/classes/<int:class_id>/update/', admin_update_class, name='admin_update_class'),
     path('api/v1/admin/classes/<int:class_id>/detail/', admin_class_detail, name='admin_class_detail'),
     path('api/v1/admin/classes/<int:class_id>/remove-student/<int:student_id>/', admin_remove_student_from_class, name='admin_remove_student'),
+
+    # Admin attendance management
+    path('api/v1/admin/attendance/semesters/', admin_attendance_semesters, name='admin_attendance_semesters'),
+    path('api/v1/admin/attendance/by-semester/<str:semester>/', admin_attendance_by_semester, name='admin_attendance_by_semester'),
 
     # Flutter Web — must be last
     re_path(r'^(?P<path>.*)$', serve_flutter, name='flutter_web'),

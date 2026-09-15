@@ -702,6 +702,50 @@ class ClassService {
     }
   }
 
+  /// Admin: Attendance Management — every semester that has attendance
+  /// sessions, with session/record stats per semester.
+  Future<List<Map<String, dynamic>>> getAdminAttendanceSemesters() async {
+    try {
+      final token = await _getToken();
+
+      final response = await _dio.get(
+        '/admin/attendance/semesters/',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      if (response.statusCode == 200) {
+        return List<Map<String, dynamic>>.from(response.data['semesters'] ?? []);
+      }
+
+      return [];
+    } catch (e) {
+      print('Error fetching attendance semesters: $e');
+      return [];
+    }
+  }
+
+  /// Admin: Attendance Management — every session of a semester with its
+  /// records nested, grouped by class.
+  Future<Map<String, dynamic>> getAdminAttendanceBySemester(String semester) async {
+    try {
+      final token = await _getToken();
+
+      final response = await _dio.get(
+        '/admin/attendance/by-semester/$semester/',
+        options: Options(headers: {'Authorization': 'Bearer $token'}),
+      );
+
+      if (response.statusCode == 200) {
+        return response.data;
+      }
+
+      return {};
+    } catch (e) {
+      print('Error fetching attendance by semester: $e');
+      return {};
+    }
+  }
+
   /// Admin: Block/unblock a user by toggling `is_active`. A blocked user
   /// cannot log in, and their existing JWTs stop working immediately
   /// (SimpleJWT rejects inactive users on every request).
