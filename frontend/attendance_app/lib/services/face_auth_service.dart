@@ -6,6 +6,28 @@ import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/api_client.dart';
 
+enum FaceVerifyStatus {
+  success,
+  mismatch,
+  noFaceDetected,
+  notRegistered,
+  error,
+}
+
+class FaceVerifyResult {
+  final FaceVerifyStatus status;
+  final String message;
+  final double? similarity;
+
+  FaceVerifyResult({
+    required this.status,
+    required this.message,
+    this.similarity,
+  });
+
+  bool get isSuccess => status == FaceVerifyStatus.success;
+}
+
 class FaceAuthService {
   static const String _faceStatusKey = 'has_registered_face';
   final Dio _dio = ApiClient().dio;
@@ -18,9 +40,21 @@ class FaceAuthService {
     print("FaceAuthService (Backend Mode) Initialized");
   }
 
-  /// Checks if the user has a saved face embedding (locally cached status)
+  /// Checks if the user has a saved face embedding (checks server first when online, falls back to local cache)
   Future<bool> hasSavedFace() async {
     final prefs = await SharedPreferences.getInstance();
+
+    // Check with backend first if online for ground truth
+    try {
+      final response = await _dio.get('/faces/status/');
+      if (response.statusCode == 200) {
+        final hasFace = response.data['has_registered_face'] == true;
+        await prefs.setBool(_faceStatusKey, hasFace);
+        return hasFace;
+      }
+    } catch (_) {}
+
+    // Fallback to local cache only if server could not be reached
     return prefs.getBool(_faceStatusKey) ?? false;
   }
 
@@ -32,7 +66,7 @@ class FaceAuthService {
   }
 
   /// Register a new face with the backend
-  Future<bool> registerFace(dynamic cameraImage) async {
+  Future<Map<String, dynamic>> registerFace(dynamic cameraImage) async {
     try {
       final base64Image = await _imageToBase64(cameraImage);
       
@@ -44,20 +78,21 @@ class FaceAuthService {
       if (response.statusCode == 200 || response.statusCode == 201) {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setBool(_faceStatusKey, true);
-        return true;
+        return {'success': true, 'message': 'Face registered successfully!'};
       }
-      return false;
+      return {'success': false, 'message': 'Registration failed.'};
     } on DioException catch (e) {
+      final msg = e.response?.data?['error']?.toString() ?? 'Registration failed.';
       print("Registration DioError: ${e.response?.data}");
-      return false;
+      return {'success': false, 'message': msg};
     } catch (e) {
       print("Registration error: $e");
-      return false;
+      return {'success': false, 'message': 'Error: $e'};
     }
   }
 
   /// Verify a live face against saved face via backend
-  Future<bool> verifyFace(dynamic cameraImage) async {
+  Future<FaceVerifyResult> verifyFace(dynamic cameraImage) async {
     try {
       final base64Image = await _imageToBase64(cameraImage);
 
@@ -67,13 +102,51 @@ class FaceAuthService {
       );
 
       if (response.statusCode == 200) {
-        // Backend returns whether verification passed
-        return response.data['success'] == true;
+        final isMatch = response.data['success'] == true;
+        final sim = (response.data['similarity'] as num?)?.toDouble();
+        if (isMatch) {
+          return FaceVerifyResult(
+            status: FaceVerifyStatus.success,
+            message: "Face matched successfully!",
+            similarity: sim,
+          );
+        } else {
+          return FaceVerifyResult(
+            status: FaceVerifyStatus.mismatch,
+            message: "Face not recognized. Try again.",
+            similarity: sim,
+          );
+        }
       }
-      return false;
+      return FaceVerifyResult(
+        status: FaceVerifyStatus.error,
+        message: "Server error during verification.",
+      );
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setBool(_faceStatusKey, false);
+        return FaceVerifyResult(
+          status: FaceVerifyStatus.notRegistered,
+          message: "No registered face found on server.",
+        );
+      }
+      final serverMsg = e.response?.data?['error']?.toString();
+      if (serverMsg != null && serverMsg.toLowerCase().contains('no face detected')) {
+        return FaceVerifyResult(
+          status: FaceVerifyStatus.noFaceDetected,
+          message: "No face detected in camera.",
+        );
+      }
+      return FaceVerifyResult(
+        status: FaceVerifyStatus.error,
+        message: serverMsg ?? "Face verification failed.",
+      );
     } catch (e) {
-      print("Verification error: $e");
-      return false;
+      return FaceVerifyResult(
+        status: FaceVerifyStatus.error,
+        message: "Verification error: $e",
+      );
     }
   }
 

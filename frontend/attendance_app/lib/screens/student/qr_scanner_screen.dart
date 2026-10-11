@@ -251,7 +251,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (decoded is! Map<String, dynamic>) {
         _showError('Invalid QR code format. Not an attendance code.');
-        setState(() => isProcessing = false);
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => isProcessing = false);
+        });
         return;
       }
 
@@ -260,7 +262,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (sessionId == null) {
         _showError('Invalid QR code');
-        setState(() => isProcessing = false);
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => isProcessing = false);
+        });
         return;
       }
 
@@ -297,7 +301,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         _showError(
           'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
         );
-        setState(() => isProcessing = false);
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => isProcessing = false);
+        });
         return;
       }
 
@@ -305,11 +311,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (token != null) {
         if (mounted) {
-          final captcha = await _showCaptchaDialog();
-          if (captcha == null) {
-            setState(() => isProcessing = false);
-            return;
-          }
+
 
           if (isOffline) {
             final timestamp = DateTime.now().toUtc().toIso8601String();
@@ -317,7 +319,6 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               sessionId,
               timestamp,
               qrToken: token,
-              captcha: captcha,
               bleHopCount: bleHopCount,
               bleRssi: bleRssi,
             );
@@ -334,7 +335,8 @@ class _QRScannerScreenState extends State<QRScannerScreen>
           final result = await _attendanceService.markAttendance(
             sessionId,
             qrToken: token,
-            captcha: captcha,
+            bleHopCount: bleHopCount,
+            bleRssi: bleRssi,
           );
 
           if (mounted) {
@@ -343,7 +345,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               _showSuccessDialog(result['message']);
             } else {
               _showError(result['message']);
-              setState(() => isProcessing = false);
+              Future.delayed(const Duration(seconds: 3), () {
+                if (mounted) setState(() => isProcessing = false);
+              });
             }
           }
         }
@@ -378,14 +382,18 @@ class _QRScannerScreenState extends State<QRScannerScreen>
             _showSuccessDialog(result['message']);
           } else {
             _showError(result['message']);
-            setState(() => isProcessing = false);
+            Future.delayed(const Duration(seconds: 3), () {
+              if (mounted) setState(() => isProcessing = false);
+            });
           }
         }
       }
     } catch (e) {
       if (mounted) {
         _showError('Invalid QR code format: $e');
-        setState(() => isProcessing = false);
+        Future.delayed(const Duration(seconds: 3), () {
+          if (mounted) setState(() => isProcessing = false);
+        });
       }
     }
   }
@@ -446,27 +454,24 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               .toList();
 
           if (patternSessions.isEmpty) {
-            _showError(
-              'No active pattern session found. Ask your teacher to start an pattern session.',
-            );
-            setState(() => isProcessing = false);
-            await _cameraController!.resumePreview();
-            return;
+            isOffline = true;
+          } else {
+            final session = patternSessions.first;
+
+            // Check if teacher has uploaded the reference image yet
+            if (session['has_reference_image'] == false) {
+              _showError(
+                'Teacher has not uploaded the board photo yet. Please wait and try again.',
+              );
+              Future.delayed(const Duration(seconds: 3), () {
+                if (mounted) setState(() => isProcessing = false);
+              });
+              await _cameraController!.resumePreview();
+              return;
+            }
+
+            sessionId = session['session_id'].toString();
           }
-
-          final session = patternSessions.first;
-
-          // Check if teacher has uploaded the reference image yet
-          if (session['has_reference_image'] == false) {
-            _showError(
-              'Teacher has not uploaded the board photo yet. Please wait and try again.',
-            );
-            setState(() => isProcessing = false);
-            await _cameraController!.resumePreview();
-            return;
-          }
-
-          sessionId = session['session_id'].toString();
         }
       }
 
@@ -981,69 +986,5 @@ class _QRScannerScreenState extends State<QRScannerScreen>
     );
   }
 
-  Future<String?> _showCaptchaDialog() async {
-    final TextEditingController captchaController = TextEditingController();
-    final formKey = GlobalKey<FormState>();
 
-    return showDialog<String>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('Enter Captcha Code'),
-          content: Form(
-            key: formKey,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'Please enter the 4-character code shown on the screen to verify your presence.',
-                  style: TextStyle(fontSize: 14),
-                ),
-                const SizedBox(height: 16),
-                TextFormField(
-                  controller: captchaController,
-                  autofocus: true,
-                  textCapitalization: TextCapitalization.characters,
-                  maxLength: 4,
-                  decoration: const InputDecoration(
-                    labelText: 'Captcha Code',
-                    hintText: 'ABCD',
-                    border: OutlineInputBorder(),
-                  ),
-                  validator: (val) {
-                    if (val == null || val.trim().length != 4) {
-                      return 'Code must be exactly 4 characters';
-                    }
-                    return null;
-                  },
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, null),
-              child: const Text('Cancel'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (formKey.currentState!.validate()) {
-                  Navigator.pop(
-                    context,
-                    captchaController.text.trim().toUpperCase(),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E5B53),
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Submit'),
-            ),
-          ],
-        );
-      },
-    );
-  }
 }

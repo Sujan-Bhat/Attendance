@@ -5,7 +5,7 @@ from django.contrib.auth import get_user_model
 from django.utils import timezone
 
 from ..models import Class, Enrollment, AttendanceSession, AttendanceRecord
-from ..serializers import TeacherAttendanceHistorySerializer, UpdateAttendanceStatusSerializer
+from ..serializers import TeacherAttendanceHistorySerializer, UpdateAttendanceStatusSerializer, SessionSerializer
 
 User = get_user_model()
 

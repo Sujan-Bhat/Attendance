@@ -5,7 +5,6 @@ import '../../widgets/student_drawer.dart';
 import '../../widgets/enhanced_dashboard_card.dart';
 import '../student/my_classes_screen.dart';
 import '../student/qr_scanner_screen.dart';
-import '../student/qr_scanner_screen.dart';
 import '../student/attendance_history_screen.dart';
 import '../student/student_profile_screen.dart';
 import '../student/student_announcements_screen.dart';
@@ -47,7 +46,7 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
       'gradientColors': [const Color(0xFF3B82F6), Colors.white],
     },
     {
-      'title': 'Scan QR',
+      'title': 'Mark Attendance',
       'subtitle': 'Start new Attendance Session',
       'icon': Icons.qr_code_scanner_rounded,
       'gradientColors': [const Color(0xFFA6FF39), Colors.white],
@@ -224,8 +223,9 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         });
         break;
 
+      case 'Mark Attendance':
       case 'Scan QR':
-        _handleScanQR();
+        _handleMarkAttendance();
         break;
 
       case 'Attendance History':
@@ -260,40 +260,39 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
     }
   }
 
-  Future<void> _handleScanQR() async {
-    final faceAuth = FaceAuthService();
-    bool hasSavedFace = await faceAuth.hasSavedFace();
+  Future<void> _handleMarkAttendance() async {
+    if (!mounted) return;
+
+    final faceService = FaceAuthService();
+    final hasFace = await faceService.hasSavedFace();
 
     if (!mounted) return;
 
-    // Launch Face Verification or Registration based on saved face
-    final result = await Navigator.push(
+    // Step 1: Face Scan (placed directly on top of the stack)
+    final verified = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
-        builder: (context) => FaceVerificationScreen(isRegistration: !hasSavedFace),
+        builder: (context) => FaceVerificationScreen(
+          isRegistration: !hasFace,
+        ),
       ),
     );
 
-    if (result == true && mounted) {
-      // If they just registered, they are effectively verified for this session.
-      // If they were already registered, they just passed verification.
-      // In either case, proceed directly to the QR scanner.
+    // Step 2 (QR/Pattern Scan) & Step 3 (BLE Verification)
+    if (verified == true && mounted) {
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const QRScannerScreen()),
       ).then((_) {
         _loadUserData(forceRefresh: true);
       });
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(!hasSavedFace 
-                ? 'Face Registration cancelled or failed.' 
-                : 'Face Verification failed.'),
-          ),
-        );
-      }
+    } else if (mounted && verified == false) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Face verification required to mark attendance.'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
     }
   }
 

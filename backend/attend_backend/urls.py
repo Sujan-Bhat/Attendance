@@ -43,6 +43,7 @@ from attendance.views import (
     announcement_detail,
     register_face,
     verify_face_auth,
+    face_status,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.static import serve as static_serve
@@ -73,7 +74,6 @@ from attendance.admin_views import (
     admin_delete_all_students,
     admin_attendance_semesters,
     admin_attendance_by_semester,
-    admin_export,
 )
 
 FLUTTER_WEB_DIR = os.path.join(settings.BASE_DIR, 'flutter_web')
@@ -151,6 +151,7 @@ urlpatterns = [
     path('api/v1/ping/', ping, name='ping'),
 
     # Face Auth
+    path('api/v1/faces/status/', face_status, name='face_status'),
     path('api/v1/faces/register/', register_face, name='register_face'),
     path('api/v1/faces/verify/', verify_face_auth, name='verify_face_auth'),
 
@@ -179,7 +180,6 @@ urlpatterns = [
     # Admin attendance management
     path('api/v1/admin/attendance/semesters/', admin_attendance_semesters, name='admin_attendance_semesters'),
     path('api/v1/admin/attendance/by-semester/<str:semester>/', admin_attendance_by_semester, name='admin_attendance_by_semester'),
-    path('api/v1/admin/export/<str:dataset>/<str:file_format>/', admin_export, name='admin_export'),
 
     # Flutter Web — must be last
     re_path(r'^(?P<path>.*)$', serve_flutter, name='flutter_web'),

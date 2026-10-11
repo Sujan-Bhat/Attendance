@@ -28,7 +28,7 @@ from .sessions_views import (  # noqa: F401
     get_active_sessions,
     get_student_active_sessions,
     get_session_details,
-    calculate_totp_and_captcha,
+    calculate_totp_token,
     mark_attendance,
     sync_offline_session,
     end_session,
@@ -44,6 +44,7 @@ from .verification_views import (  # noqa: F401
     sync_offline_pattern,
     register_face,
     verify_face_auth,
+    face_status,
 )
 
 from .history_views import (  # noqa: F401
@@ -82,7 +83,7 @@ __all__ = [
     "get_active_sessions",
     "get_student_active_sessions",
     "get_session_details",
-    "calculate_totp_and_captcha",
+    "calculate_totp_token",
     "mark_attendance",
     "sync_offline_session",
     "end_session",
@@ -95,6 +96,7 @@ __all__ = [
     "sync_offline_pattern",
     "register_face",
     "verify_face_auth",
+    "face_status",
     "get_student_enrolled_classes",
     "get_student_attendance_history",
     "check_student_by_email",

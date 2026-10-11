@@ -225,25 +225,14 @@ def get_session_details(request, session_id):
 
 
 
-def calculate_totp_and_captcha(session_id, totp_secret, rotation_interval, timestamp, start_timestamp=0):
+def calculate_totp_token(session_id, totp_secret, rotation_interval, timestamp, start_timestamp=0):
     window = int((timestamp - start_timestamp) / rotation_interval)
     
     # Token
     token_input = f"{session_id}-{totp_secret}-{window}"
     token = hashlib.sha256(token_input.encode('utf-8')).hexdigest()[:16]
     
-    # Captcha
-    captcha_input = f"{session_id}-{totp_secret}-{window}-captcha"
-    captcha_hash = hashlib.sha256(captcha_input.encode('utf-8')).hexdigest()
-    
-    chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
-    num = int(captcha_hash[:8], 16)
-    captcha = ""
-    for i in range(4):
-        captcha += chars[num % len(chars)]
-        num = num // len(chars)
-        
-    return token, captcha
+    return token
 
 
 @api_view(['POST'])
@@ -298,11 +287,10 @@ def mark_attendance(request, session_id):
     # Validate rotating QR and captcha if it's a QR session
     if session.class_type == 'qr':
         token = request.data.get('token')
-        captcha = request.data.get('captcha')
         
-        if not token or not captcha:
+        if not token:
             return Response(
-                {'error': 'QR code token and captcha are required'},
+                {'error': 'QR code token is required'},
                 status=status.HTTP_400_BAD_REQUEST
             )
             
@@ -314,14 +302,14 @@ def mark_attendance(request, session_id):
         # Allow current, previous, and next windows (total 3 windows to be highly tolerant of drift)
         for offset in [0, -1, 1]:
             test_timestamp = target_timestamp + (offset * (session.rotation_interval or 10))
-            expected_token, expected_captcha = calculate_totp_and_captcha(
+            expected_token = calculate_totp_token(
                 str(session.session_id),
                 session.totp_secret or '',
                 session.rotation_interval or 10,
                 test_timestamp,
                 start_timestamp
             )
-            if token == expected_token and captcha.upper() == expected_captcha.upper():
+            if token == expected_token:
                 valid = True
                 break
                 
@@ -355,6 +343,13 @@ def mark_attendance(request, session_id):
                 'class': session.class_obj.class_name,
                 'marked_at': existing_record.marked_at,
                 'status': 'present'
+            }, status=status.HTTP_200_OK)
+
+        if is_offline_sync:
+            return Response({
+                'message': 'Attendance already marked',
+                'marked_at': existing_record.marked_at,
+                'status': existing_record.status
             }, status=status.HTTP_200_OK)
 
         return Response({
@@ -427,6 +422,15 @@ def sync_offline_session(request):
         end_time_str = request.data.get('end_time')
         shape_data_str = request.data.get('shape_data')
         reference_image = request.FILES.get('reference_image')
+        totp_secret = request.data.get('totp_secret')
+        rotation_interval_str = request.data.get('rotation_interval')
+        
+        rotation_interval = 10
+        if rotation_interval_str:
+            try:
+                rotation_interval = int(rotation_interval_str)
+            except ValueError:
+                pass
 
         if not all([class_id, start_time_str, end_time_str, duration_minutes]):
             return Response({'error': 'Missing required fields'}, status=status.HTTP_400_BAD_REQUEST)
@@ -434,6 +438,11 @@ def sync_offline_session(request):
         from django.utils.dateparse import parse_datetime
         start_time = parse_datetime(start_time_str)
         end_time = parse_datetime(end_time_str)
+        
+        # 24-hour rule check
+        time_diff = timezone.now() - start_time
+        if time_diff.total_seconds() > (24 * 3600):
+            return Response({'error': 'Session expired (older than 24 hours) and is discarded.'}, status=status.HTTP_400_BAD_REQUEST)
         
         class_obj = Class.objects.get(id=class_id)
         
@@ -493,6 +502,8 @@ def sync_offline_session(request):
             instruction_card=instruction_card,
             shape_data=shape_data,
             qr_code_data=json.dumps(qr_data),
+            totp_secret=totp_secret,
+            rotation_interval=rotation_interval,
             status='completed' # Offline sessions are synced after they finish usually
         )
         # Override start_time and end_time, which might be auto_now_add
@@ -526,18 +537,13 @@ def sync_offline_session(request):
             student_id__in=already_marked
         )
         
-        # 24-hour rule check
-        time_diff = timezone.now() - session.start_time
-        is_expired = time_diff.total_seconds() > (24 * 3600)
-        default_status = 'present' if is_expired else 'absent'
-        
         absent_records = []
         for enrollment in absent_students:
             absent_records.append(
                 AttendanceRecord(
                     session=session,
                     student=enrollment.student,
-                    status=default_status
+                    status='absent'
                 )
             )
         

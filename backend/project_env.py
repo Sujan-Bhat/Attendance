@@ -9,6 +9,10 @@ import sys
 
 
 def isolate_from_external_pythonpath():
+    # In Azure App Service, PYTHONPATH points to antenv virtualenv site-packages.
+    if os.environ.get('WEBSITE_SITE_NAME') or os.environ.get('WEBSITE_INSTANCE_ID'):
+        return
+
     raw = os.environ.get('PYTHONPATH')
     if not raw:
         return

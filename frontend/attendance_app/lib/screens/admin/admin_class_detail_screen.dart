@@ -20,18 +20,10 @@ class AdminClassDetailScreen extends StatefulWidget {
 class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
   final ClassService _classService = ClassService();
   bool _isLoading = false;
-  String? _errorMessage;
   List<Map<String, dynamic>> _students = [];
   String _classCode = '';
   String _className = '';
   String _teacherName = '';
-
-  /// Uppercase single-letter avatar initial, safe for null/empty usernames
-  /// (a raw `substring(0, 1)` throws a RangeError on an empty string).
-  String _initialOf(dynamic username) {
-    final name = username?.toString() ?? '';
-    return name.isEmpty ? 'S' : name.substring(0, 1).toUpperCase();
-  }
 
   @override
   void initState() {
@@ -42,38 +34,24 @@ class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
   }
 
   Future<void> _loadClassDetail() async {
-    setState(() {
-      _isLoading = true;
-      _errorMessage = null;
-    });
+    setState(() => _isLoading = true);
 
     try {
       final data = await _classService.getAdminClassDetail(widget.classId);
 
-      if (!mounted) return;
-      if (data.isEmpty) {
-        // An empty map is a failed fetch, not an empty roster — without this
-        // branch the spinner above never stopped.
+      if (mounted && data.isNotEmpty) {
         setState(() {
+          _classCode = data['class_code'] ?? widget.classCode;
+          _className = data['class_name'] ?? widget.className;
+          _teacherName = data['teacher_name']?.toString() ?? '';
+          _students = List<Map<String, dynamic>>.from(data['students'] ?? []);
           _isLoading = false;
-          _errorMessage = 'Could not load this class. Please try again.';
         });
-        return;
       }
-      setState(() {
-        _classCode = data['class_code'] ?? widget.classCode;
-        _className = data['class_name'] ?? widget.className;
-        _teacherName = data['teacher_name']?.toString() ?? '';
-        _students = List<Map<String, dynamic>>.from(data['students'] ?? []);
-        _isLoading = false;
-      });
     } catch (e) {
       print('Error loading class detail: $e');
       if (mounted) {
-        setState(() {
-          _isLoading = false;
-          _errorMessage = 'Could not load this class. Please try again.';
-        });
+        setState(() => _isLoading = false);
       }
     }
   }
@@ -140,45 +118,9 @@ class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
                 valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF0097A7)),
               ),
             )
-          : _errorMessage != null
-              ? _buildErrorState()
-              : _students.isEmpty
-                  ? _buildEmptyState()
-                  : _buildStudentList(),
-    );
-  }
-
-  Widget _buildErrorState() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.error_outline_rounded, size: 72, color: Colors.red.shade300),
-          const SizedBox(height: 16),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Text(
-              _errorMessage!,
-              textAlign: TextAlign.center,
-              style: const TextStyle(
-                fontSize: 15,
-                color: Color(0xFF6B7280),
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          ElevatedButton.icon(
-            onPressed: _loadClassDetail,
-            icon: const Icon(Icons.refresh_rounded, size: 18),
-            label: const Text('Try again'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF007C91),
-              foregroundColor: Colors.white,
-            ),
-          ),
-        ],
-      ),
+          : _students.isEmpty
+              ? _buildEmptyState()
+              : _buildStudentList(),
     );
   }
 
@@ -234,8 +176,9 @@ class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
           children: [
             CircleAvatar(
               backgroundColor: const Color(0xFF007C91),
-              radius: 22,                child: Text(
-                  _initialOf(student['username']),
+              radius: 22,
+              child: Text(
+                (student['username'] as String?)?.substring(0, 1).toUpperCase() ?? 'S',
                 style: const TextStyle(
                   color: Colors.white,
                   fontWeight: FontWeight.bold,
@@ -342,31 +285,27 @@ class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
                             classCode: codeController.text.trim(),
                             className: nameController.text.trim(),
                           );
-                          if (!mounted) return;
                           if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
                           if (result['error'] != null) {
-                            // Stay open: popping first discarded the admin's
-                            // input on every validation failure.
-                            setDialogState(() => isSaving = false);
                             ScaffoldMessenger.of(this.context).showSnackBar(
                               SnackBar(
-                                content: Text(result['error'].toString()),
+                                content: Text(result['error']),
                                 backgroundColor: Colors.red,
                               ),
                             );
-                            return;
+                          } else {
+                            setState(() {
+                              _classCode = codeController.text.trim();
+                              _className = nameController.text.trim();
+                            });
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Class updated successfully'),
+                                backgroundColor: Color(0xFF007C91),
+                              ),
+                            );
                           }
-                          Navigator.pop(ctx);
-                          setState(() {
-                            _classCode = codeController.text.trim();
-                            _className = nameController.text.trim();
-                          });
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Class updated successfully'),
-                              backgroundColor: Color(0xFF007C91),
-                            ),
-                          );
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF007C91),
@@ -436,44 +375,30 @@ class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
                   onPressed: isSaving
                       ? null
                       : () async {
-                          final studentId =
-                              int.tryParse(student['id']?.toString() ?? '');
-                          if (studentId == null) {
-                            setDialogState(() => isSaving = false);
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Cannot edit: student id missing'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                            return;
-                          }
                           setDialogState(() => isSaving = true);
                           final result = await _classService.updateStudentDetails(
-                            studentId: studentId,
+                            studentId: student['id'],
                             username: nameController.text.trim(),
                             email: emailController.text.trim(),
                           );
-                          if (!mounted) return;
                           if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
                           if (result['error'] != null) {
-                            setDialogState(() => isSaving = false);
                             ScaffoldMessenger.of(this.context).showSnackBar(
                               SnackBar(
-                                content: Text(result['error'].toString()),
+                                content: Text(result['error']),
                                 backgroundColor: Colors.red,
                               ),
                             );
-                            return;
+                          } else {
+                            _loadClassDetail();
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Student updated successfully'),
+                                backgroundColor: Color(0xFF007C91),
+                              ),
+                            );
                           }
-                          Navigator.pop(ctx);
-                          _loadClassDetail();
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Student updated successfully'),
-                              backgroundColor: Color(0xFF007C91),
-                            ),
-                          );
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF007C91),
@@ -511,22 +436,10 @@ class _AdminClassDetailScreenState extends State<AdminClassDetailScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final studentId =
-                  int.tryParse(student['id']?.toString() ?? '');
               Navigator.pop(ctx);
-              if (studentId == null) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Cannot remove: student id missing'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                return;
-              }
               final success = await _classService.adminRemoveStudentFromClass(
                 widget.classId,
-                studentId,
+                student['id'],
               );
               if (!mounted) return;
               if (success) {

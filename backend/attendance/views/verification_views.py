@@ -23,7 +23,10 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from django.conf import settings
 
-FACE_DATA_DIR = os.path.join(settings.BASE_DIR, 'face_data')
+if os.getenv('WEBSITE_SITE_NAME'):
+    FACE_DATA_DIR = '/home/face_data'
+else:
+    FACE_DATA_DIR = os.path.join(settings.BASE_DIR, 'face_data')
 os.makedirs(FACE_DATA_DIR, exist_ok=True)
 
 try:
@@ -83,8 +86,15 @@ def upload_reference_image(request, session_id):
             )
             
     except Exception as e:
+        import traceback
+        error_msg = str(e)
+        if "AI Verification Service Error" in error_msg:
+            return Response(
+                {'error': f"AI Service Temporarily Unavailable: {error_msg}", 'trace': traceback.format_exc()},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE
+            )
         return Response(
-            {'error': f'Failed to process image: {str(e)}'},
+            {'error': f'Failed to process image: {error_msg}', 'trace': traceback.format_exc()},
             status=status.HTTP_400_BAD_REQUEST
         )
         
@@ -233,7 +243,10 @@ def verify_image(request):
         }, status=status.HTTP_201_CREATED)
     except Exception as e:
         import traceback
-        return Response({'error': f"Backend Error: {str(e)}", 'trace': traceback.format_exc()}, status=status.HTTP_400_BAD_REQUEST)
+        error_msg = str(e)
+        if "AI Verification Service Error" in error_msg:
+            return Response({'error': f"AI Service Temporarily Unavailable: {error_msg}", 'trace': traceback.format_exc()}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'error': f"Backend Error: {error_msg}", 'trace': traceback.format_exc()}, status=status.HTTP_400_BAD_REQUEST)
 
 
 @api_view(['POST'])
@@ -282,7 +295,7 @@ def sync_offline_pattern(request):
         existing_record = AttendanceRecord.objects.filter(session=session, student=user).first()
         if existing_record:
             if existing_record.status not in ['absent', 'pending_review']:
-                return Response({'error': 'Attendance already marked', 'marked_at': existing_record.marked_at, 'status': existing_record.status}, status=status.HTTP_400_BAD_REQUEST)
+                return Response({'message': 'Attendance already marked', 'marked_at': existing_record.marked_at, 'status': existing_record.status}, status=status.HTTP_200_OK)
 
         # Extract BLE Mesh Proofs
         ble_hop_count = request.data.get('ble_hop_count')
@@ -320,26 +333,39 @@ def sync_offline_pattern(request):
             score_penalty = verification_reasons_dict['ble_hop_count'] * 0.05
             final_score = max(0.0, final_score - score_penalty)
 
-        status_val = 'present' if matched else 'pending_review'
+        if not matched:
+            is_active = session.status == 'active' and timezone.now() < session.end_time
+            if is_active:
+                if existing_record:
+                    existing_record.delete()
+                return Response({
+                    'status': 'failed_retry',
+                    'message': 'Verification failed. The session is still active, please scan again.'
+                }, status=status.HTTP_200_OK)
 
-        if existing_record:
-            existing_record.status = status_val
-            existing_record.verification_score = final_score
-            existing_record.verification_reasons = json.dumps(verification_reasons_dict)
-            existing_record.save()
-            record = existing_record
+            status_val = 'pending_review'
         else:
-            record = AttendanceRecord.objects.create(
-                session=session,
-                student=user,
-                status=status_val,
-                verification_score=final_score,
-                verification_reasons=json.dumps(verification_reasons_dict)
-            )
+            status_val = 'present'
 
-        if scan_time:
-            AttendanceRecord.objects.filter(id=record.id).update(marked_at=scan_time)
-            record.refresh_from_db()
+        if not matched and not is_active or matched:
+            if existing_record:
+                existing_record.status = status_val
+                existing_record.verification_score = final_score
+                existing_record.verification_reasons = json.dumps(verification_reasons_dict)
+                existing_record.save()
+                record = existing_record
+            else:
+                record = AttendanceRecord.objects.create(
+                    session=session,
+                    student=user,
+                    status=status_val,
+                    verification_score=final_score,
+                    verification_reasons=json.dumps(verification_reasons_dict)
+                )
+
+            if scan_time:
+                AttendanceRecord.objects.filter(id=record.id).update(marked_at=scan_time)
+                record.refresh_from_db()
 
         if not matched:
             return Response({'status': 'pending_review', 'message': f'Verification failed. Marked for manual review. Reasons: {", ".join(reasons)}'}, status=status.HTTP_200_OK)
@@ -347,7 +373,28 @@ def sync_offline_pattern(request):
         return Response({'status': 'pass', 'message': f'Offline attendance synced for {session.class_obj.class_code}'}, status=status.HTTP_201_CREATED)
     except Exception as e:
         import traceback
-        return Response({'error': f"Backend Error: {str(e)}", 'trace': traceback.format_exc()}, status=status.HTTP_400_BAD_REQUEST)
+        error_msg = str(e)
+        if "AI Verification Service Error" in error_msg:
+            return Response({'error': f"AI Service Temporarily Unavailable: {error_msg}", 'trace': traceback.format_exc()}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+        return Response({'error': f"Backend Error: {error_msg}", 'trace': traceback.format_exc()}, status=status.HTTP_400_BAD_REQUEST)
+
+def _decode_image_bgr(base64_img):
+    """
+    Decodes a base64 image into a numpy uint8 array formatted as BGR (for InsightFace).
+    Uses PIL (Pillow) first for universal stability, with cv2 fallback.
+    """
+    img_data = base64.b64decode(base64_img)
+    try:
+        from PIL import Image
+        import io
+        pil_img = Image.open(io.BytesIO(img_data)).convert('RGB')
+        # Convert RGB to BGR in pure NumPy
+        return np.array(pil_img)[:, :, ::-1]
+    except Exception:
+        np_arr = np.frombuffer(img_data, np.uint8)
+        if hasattr(cv2, 'imdecode'):
+            return cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        raise ValueError("Could not decode image.")
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -357,10 +404,8 @@ def register_face(request):
         if not base64_img:
             return Response({'error': 'No image provided'}, status=400)
             
-        # Decode base64
-        img_data = base64.b64decode(base64_img)
-        np_arr = np.frombuffer(img_data, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        # Decode base64 to numpy BGR image
+        img = _decode_image_bgr(base64_img)
         
         if face_app is None:
             return Response({'error': 'InsightFace AI model failed to load on the server. Please restart Django.'}, status=500)
@@ -388,10 +433,8 @@ def verify_face_auth(request):
         if not base64_img:
             return Response({'error': 'No image provided'}, status=400)
             
-        # Decode base64
-        img_data = base64.b64decode(base64_img)
-        np_arr = np.frombuffer(img_data, np.uint8)
-        img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        # Decode base64 to numpy BGR image
+        img = _decode_image_bgr(base64_img)
         
         if face_app is None:
             return Response({'error': 'InsightFace AI model failed to load on the server. Please restart Django.'}, status=500)
@@ -424,3 +467,15 @@ def verify_face_auth(request):
         return Response({'success': is_match, 'similarity': float(similarity)})
     except Exception as e:
         return Response({'error': str(e)}, status=500)
+
+@api_view(['GET'])
+@permission_classes([IsAuthenticated])
+def face_status(request):
+    """Check if the authenticated user has a registered face embedding on disk."""
+    try:
+        user_id = request.user.id
+        file_path = os.path.join(FACE_DATA_DIR, f"{user_id}.npy")
+        return Response({'has_registered_face': os.path.exists(file_path)})
+    except Exception as e:
+        return Response({'error': str(e)}, status=500)
+

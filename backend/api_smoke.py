@@ -2,7 +2,7 @@ import requests
 import json
 import io
 
-base_url = "https://attendance-production-5fb3.up.railway.app/api/v1"
+base_url = "http://localhost:8000/api/v1"
 
 # 1. Login as Admin/Teacher to create a session
 t_login = requests.post(f"{base_url}/auth/token/", json={"email": "teacher@example.com", "password": "password123"})

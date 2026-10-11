@@ -6,6 +6,7 @@ from google.genai import types
 import cv2
 import numpy as np
 import random
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -54,16 +55,24 @@ def validate_focal_distance(focal_distance, homography_distance_estimate=None):
         
     return True, distance
 
-# Initialize the Gemini client
-# It automatically picks up GEMINI_API_KEY from the environment
-def get_gemini_client():
+def get_gemini_clients():
     try:
         from dotenv import load_dotenv
         load_dotenv()
-        return genai.Client()
+        keys_str = os.environ.get('GEMINI_API_KEY', '')
+        keys = [k.strip() for k in keys_str.split(',') if k.strip()]
+        clients = []
+        for k in keys:
+            clients.append(genai.Client(api_key=k))
+        
+        if not clients:
+            # Fallback for when standard environment variable discovery is preferred
+            clients.append(genai.Client())
+            
+        return clients
     except Exception as e:
-        logger.error(f"Failed to initialize Gemini client: {e}")
-        return None
+        logger.error(f"Failed to initialize Gemini clients: {e}")
+        return []
 
 def verify_teacher_reference(reference_image_bytes, expected_code, shape_data=None):
     """
@@ -71,8 +80,8 @@ def verify_teacher_reference(reference_image_bytes, expected_code, shape_data=No
     Uses Gemini to verify that the image contains the expected code
     AND that the code is enclosed in a large hand-drawn geometric shape.
     """
-    client = get_gemini_client()
-    if not client:
+    clients = get_gemini_clients()
+    if not clients:
         return False, "Server error: Gemini API not configured."
 
     shape_instructions = ""
@@ -99,31 +108,66 @@ def verify_teacher_reference(reference_image_bytes, expected_code, shape_data=No
     """
 
     try:
-        response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[
-                types.Part.from_bytes(data=reference_image_bytes, mime_type='image/jpeg'),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            )
-        )
+        last_error = None
         
-        # Parse the JSON response
-        text = response.text
-        # Remove markdown code blocks if present
-        if text.startswith("```json"):
-            text = text[7:-3]
-        elif text.startswith("```"):
-            text = text[3:-3]
+        for client in clients:
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-3.6-flash',
+                        contents=[
+                            types.Part.from_bytes(data=reference_image_bytes, mime_type='image/jpeg'),
+                            prompt,
+                        ],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.0
+                        )
+                    )
+                    
+                    # Parse the JSON response
+                    text = response.text
+                    # Remove markdown code blocks if present
+                    if text.startswith("```json"):
+                        text = text[7:-3]
+                    elif text.startswith("```"):
+                        text = text[3:-3]
+                        
+                    result = json.loads(text.strip())
+                    return result.get('success', False), result.get('message', "Unknown error")
+                except Exception as e:
+                    error_str = str(e)
+                    
+                    # 429 Quota Exhausted: The key is dead for now. Don't retry on the same key, try next key immediately.
+                    if "429" in error_str or "resource_exhausted" in error_str.lower() or "quota" in error_str.lower():
+                        logger.warning(f"Gemini API Key Quota Exhausted: {e}. Trying next API key if available...")
+                        last_error = e
+                        break # Break attempt loop, move to next client
+
+                    # 503 High Demand: Temporary Google server overload. Wait and retry.
+                    elif "503" in error_str or "high demand" in error_str.lower():
+                        logger.warning(f"Gemini client unavailable (503 High Demand) on attempt {attempt+1}: {e}.")
+                        last_error = e
+                        if attempt < 2:
+                            time.sleep(2)  # Wait 2 seconds before retrying
+                            continue
+                        else:
+                            logger.warning("Max retries reached for this API key due to 503. Trying next key...")
+                            break # Break inner loop, try next client
+                    
+                    # Other unknown errors
+                    else:
+                        logger.error(f"Gemini verification failed: {e}")
+                        raise Exception(f"AI Verification Service Error: {e}")
+                    
+        # If all keys failed
+        if last_error:
+            logger.error(f"All Gemini API keys failed due to quota/high demand. Last error: {last_error}")
+            raise Exception(f"AI Verification Service Error (Quota/High Demand): {last_error}")
             
-        result = json.loads(text.strip())
-        return result.get('success', False), result.get('message', "Unknown error")
     except Exception as e:
         logger.error(f"Gemini verification failed: {e}")
-        return False, f"Verification failed: {e}"
+        raise Exception(f"AI Verification Service Error: {e}")
 
 def _bytes_to_cv2(image_bytes):
     nparr = np.frombuffer(image_bytes, np.uint8)
@@ -135,8 +179,8 @@ def verify_offline_code(expected_code, reference_image, student_image, flash_fir
     Main verification pipeline using Gemini Vision AI.
     Returns (matched: bool, score: float, reasons: list)
     """
-    client = get_gemini_client()
-    if not client:
+    clients = get_gemini_clients()
+    if not clients:
         return False, 0.0, ["Server error: Gemini API not configured."]
 
     prompt = f"""
@@ -175,31 +219,66 @@ def verify_offline_code(expected_code, reference_image, student_image, flash_fir
         ref_bytes = _load_image_bytes(reference_image)
         stu_bytes = _load_image_bytes(student_image)
 
-        response = client.models.generate_content(
-            model='gemini-3.6-flash',
-            contents=[
-                types.Part.from_bytes(data=ref_bytes, mime_type='image/jpeg'),
-                types.Part.from_bytes(data=stu_bytes, mime_type='image/jpeg'),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.0
-            )
-        )
+        last_error = None
         
-        text = response.text
-        if text.startswith("```json"):
-            text = text[7:-3]
-        elif text.startswith("```"):
-            text = text[3:-3]
+        for client in clients:
+            for attempt in range(3):
+                try:
+                    response = client.models.generate_content(
+                        model='gemini-3.6-flash',
+                        contents=[
+                            types.Part.from_bytes(data=ref_bytes, mime_type='image/jpeg'),
+                            types.Part.from_bytes(data=stu_bytes, mime_type='image/jpeg'),
+                            prompt,
+                        ],
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            temperature=0.0
+                        )
+                    )
+                    
+                    text = response.text
+                    if text.startswith("```json"):
+                        text = text[7:-3]
+                    elif text.startswith("```"):
+                        text = text[3:-3]
+                        
+                    result = json.loads(text.strip())
+                    success = result.get('success', False)
+                    score = float(result.get('score', 0.0))
+                    reasons = result.get('reasons', [])
+                    
+                    return success, score, reasons
+                except Exception as e:
+                    error_str = str(e)
+                    
+                    # 429 Quota Exhausted: The key is dead for now. Don't retry on the same key, try next key immediately.
+                    if "429" in error_str or "resource_exhausted" in error_str.lower() or "quota" in error_str.lower():
+                        logger.warning(f"Gemini API Key Quota Exhausted: {e}. Trying next API key if available...")
+                        last_error = e
+                        break # Break attempt loop, move to next client
+
+                    # 503 High Demand: Temporary Google server overload. Wait and retry.
+                    elif "503" in error_str or "high demand" in error_str.lower():
+                        logger.warning(f"Gemini client unavailable (503 High Demand) on attempt {attempt+1}: {e}.")
+                        last_error = e
+                        if attempt < 2:
+                            time.sleep(2)  # Wait 2 seconds before retrying
+                            continue
+                        else:
+                            logger.warning("Max retries reached for this API key due to 503. Trying next key...")
+                            break # Break inner loop, try next client
+                    
+                    # Other unknown errors
+                    else:
+                        logger.error(f"Gemini structural verification failed: {e}")
+                        raise Exception(f"AI Verification Service Error: {e}")
+                    
+        if last_error:
+            logger.error(f"All Gemini API keys failed due to quota/high demand. Last error: {last_error}")
+            raise Exception(f"AI Verification Service Error (Quota/High Demand): {last_error}")
             
-        result = json.loads(text.strip())
-        success = result.get('success', False)
-        score = float(result.get('score', 0.0))
-        reasons = result.get('reasons', [])
-        
-        return success, score, reasons
     except Exception as e:
         logger.error(f"Gemini structural verification failed: {e}")
-        return False, 0.0, [f"Verification failed: {e}"]
+        # Raise the exception so the view can return a 503 instead of masking it as a successful review.
+        raise Exception(f"AI Verification Service Error: {e}")

@@ -1,1 +1,4 @@
+--find-links wheels
+--find-links backend/wheels
 -r backend/requirements.txt
+
