@@ -172,8 +172,10 @@ class AttendanceService {
       return {'success': false, 'message': 'Failed to update status'};
     } on DioException catch (e) {
       return {
+        // Unguarded `data['error']` threw whenever the body was HTML (502,
+        // Django debug page), hiding the real failure.
         'success': false,
-        'message': e.response?.data['error'] ?? 'Failed to update status',
+        'message': apiErrorMessage(e, 'Failed to update status'),
       };
     } catch (e) {
       return {'success': false, 'message': 'Unexpected error: $e'};

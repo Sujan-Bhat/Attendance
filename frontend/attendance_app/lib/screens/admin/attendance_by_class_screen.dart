@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../services/class_service.dart';
+import 'widgets/admin_export_button.dart';
 import 'widgets/admin_header_actions.dart';
 
 abstract class _AppColors {
@@ -124,13 +125,40 @@ class _AttendanceByClassScreenState extends State<AttendanceByClassScreen> {
                   '${r['email'] ?? ''}'.toLowerCase().contains(q));
             }).toList();
       if (matchedSessions.isNotEmpty) {
-        result.add({...cls, 'sessions': matchedSessions});
+        // Recompute the aggregates from the filtered sessions; keeping the
+        // server's original counts would advertise e.g. "45 records" above a
+        // list showing one session.
+        final recordCount = matchedSessions.fold<int>(
+          0,
+          (sum, s) =>
+              sum + (List<Map<String, dynamic>>.from(s['records'] ?? []).length),
+        );
+        final presentCount = matchedSessions.fold<int>(0, (sum, s) {
+          final records =
+              List<Map<String, dynamic>>.from(s['records'] ?? []);
+          return sum +
+              records.where((r) => r['status'] == 'present').length;
+        });
+        result.add({
+          ...cls,
+          'sessions': matchedSessions,
+          'session_count': matchedSessions.length,
+          'record_count': recordCount,
+          'present_count': presentCount,
+        });
       }
     }
     return result;
   }
 
-  DateTime? _parse(dynamic iso) => DateTime.tryParse(iso?.toString() ?? '');
+  /// Parses a DRF timestamp (serialised in UTC, `…+00:00`) into the
+  /// device's local time. Without `.toLocal()` the raw UTC hour was shown,
+  /// which disagreed with the PDF export (rendered with `timezone.localtime`)
+  /// and put evening sessions on the wrong date.
+  DateTime? _parse(dynamic iso) {
+    final parsed = DateTime.tryParse(iso?.toString() ?? '');
+    return parsed?.toLocal();
+  }
 
   String _fmtDate(DateTime? dt) {
     if (dt == null) return '--';
@@ -182,7 +210,7 @@ class _AttendanceByClassScreenState extends State<AttendanceByClassScreen> {
       case 'pending_review':
         return 'Review';
       default:
-        return status;
+        return status.isEmpty ? 'Unknown' : status;
     }
   }
 
@@ -237,6 +265,10 @@ class _AttendanceByClassScreenState extends State<AttendanceByClassScreen> {
           ],
         ),
         actions: [
+          AdminExportButton(
+            dataset: 'attendance',
+            semester: widget.semesterLabel,
+          ),
           AdminHeaderActions(onRefresh: _loadAttendance, showLogout: false),
         ],
       ),
@@ -532,7 +564,9 @@ class _AttendanceByClassScreenState extends State<AttendanceByClassScreen> {
   }
 
   Widget _buildRecordRow(Map<String, dynamic> record) {
-    final status = (record['status'] ?? 'present').toString();
+    // Default to '' (renders grey / "Unknown") so a missing status is never
+    // reported as attended in this audit view.
+    final status = (record['status'] ?? '').toString();
     final color = _statusColor(status);
 
     return Padding(

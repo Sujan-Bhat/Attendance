@@ -52,6 +52,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
   Map<String, dynamic>? _cachedUserData;
   DateTime? _lastFetch;
 
+  /// Non-null when the stats request failed; the counts are then left at
+  /// their last known value instead of silently rendering as zero.
+  String? _statsError;
+
   @override
   void initState() {
     super.initState();
@@ -125,39 +129,50 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     setState(() => _isLoading = true);
 
     try {
-      final results = await Future.wait([
-        _authService.getCurrentUser(),
-        _classService.getAdminStats(),
-      ]);
-
+      final userData = await _authService.getCurrentUser();
 
       if (!mounted) return;
-      final userData = results[0];
-      final stats = results[1]!;
-
       setState(() {
         _cachedUserData = userData;
         _lastFetch = DateTime.now();
         _adminName = displayName(userData);
         _username = userData?['username'] ?? '';
+      });
+    } catch (e) {
+      debugPrint('Error loading admin profile: $e');
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      return;
+    }
+
+    try {
+      final stats = await _classService.getAdminStats();
+
+      if (!mounted) return;
+      setState(() {
         _studentCount =
             int.tryParse(stats['students_count']?.toString() ?? '') ?? 0;
         _teacherCount =
             int.tryParse(stats['teachers_count']?.toString() ?? '') ?? 0;
+        _statsError = null;
         _isLoading = false;
       });
     } catch (e) {
-      debugPrint('Error loading admin dashboard data: $e');
+      // Fetched separately from the profile so a stats failure still shows
+      // the admin's name instead of blanking the whole screen.
+      debugPrint('Error loading admin stats: $e');
       if (!mounted) return;
       setState(() {
+        _statsError = 'Counts are unavailable right now.';
         _isLoading = false;
       });
     }
   }
 
-  Future<void> _handleCardTap(String title) async {
-    await navigateToAdminScreen(context, title);
-    _loadUserData(forceRefresh: true);
+  Future<void> _handleCardTap(String title) {
+    // Navigation replaces this route, so there is nothing left to refresh
+    // after the jump — the destination screen loads its own data.
+    return navigateToAdminScreen(context, title);
   }
 
   @override
@@ -167,9 +182,79 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
     return AdminWebLayout(
       currentRoute: 'Dashboard',
-      showMobileAppBar: false,
+      mobileTitle: _buildMobileTitle(isMobile),
+      mobileActions: [
+        IconButton(
+          icon: const Icon(Icons.refresh, color: _AppColors.textPrimary),
+          onPressed: () => _loadUserData(forceRefresh: true),
+          tooltip: 'Refresh',
+        ),
+        IconButton(
+          icon: const Icon(Icons.logout, color: _AppColors.textPrimary),
+          onPressed: _logout,
+          tooltip: 'Logout',
+        ),
+      ],
       mobileChild: _buildMobileBody(isMobile),
       desktopBody: _buildDesktopBody(),
+    );
+  }
+
+  Future<void> _logout() async {
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Logout'),
+        content: const Text('Are you sure you want to logout?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Logout', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await _authService.logout();
+      if (mounted) Navigator.pushReplacementNamed(context, '/login');
+    }
+  }
+
+  Widget _buildMobileTitle(bool isMobile) {
+    return Row(
+      children: [
+        Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [_AppColors.tealDark, _AppColors.teal],
+            ),
+            shape: BoxShape.circle,
+          ),
+          padding: const EdgeInsets.all(8),
+          child: const Icon(
+            Icons.admin_panel_settings_rounded,
+            color: Colors.white,
+            size: 20,
+          ),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Text(
+            'Welcome, ${_username.isEmpty ? _adminName : _username}',
+            style: TextStyle(
+              fontSize: isMobile ? 16 : 18,
+              fontWeight: FontWeight.bold,
+              color: _AppColors.textPrimary,
+            ),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+      ],
     );
   }
 
@@ -178,41 +263,27 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
 
     return Stack(
       children: [
-        Column(
-          children: [
-            _buildMobileTopBar(),
-            Expanded(
-              child: SafeArea(
-                top: false,
-                child: AdminEntrance(
-                  child: SingleChildScrollView(
-                    physics: const BouncingScrollPhysics(),
-                    child: Padding(
-                      padding: EdgeInsets.all(isMobile ? 12 : 24),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          _buildStatsSection(isMobile),
-                          const SizedBox(height: 24),
-                          _buildSectionHeader(isCompact: isMobile),
-                          const SizedBox(height: 16),
-                          Center(
-                            child: ConstrainedBox(
-                              constraints: const BoxConstraints(maxWidth: 1100),
-                              child: _buildDashboardGrid(
-                                crossAxisCount,
-                                isMobile,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
+        AdminEntrance(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            child: Padding(
+              padding: EdgeInsets.all(isMobile ? 16 : 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildStatsSection(isMobile),
+                  if (_statsError != null) ...[
+                    const SizedBox(height: 12),
+                    _buildStatsErrorHint(),
+                  ],
+                  const SizedBox(height: 24),
+                  _buildSectionHeader(),
+                  const SizedBox(height: 16),
+                  _buildDashboardGrid(crossAxisCount),
+                ],
               ),
             ),
-          ],
+          ),
         ),
         if (_isLoading) _buildLoadingOverlay(),
       ],
@@ -233,10 +304,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   _buildDesktopHeader(),
                   const SizedBox(height: 32),
                   _buildStatsRow(),
+                  if (_statsError != null) ...[
+                    const SizedBox(height: 14),
+                    _buildStatsErrorHint(),
+                  ],
                   const SizedBox(height: 48),
                   _buildSectionHeader(),
                   const SizedBox(height: 24),
-                  _buildDashboardGrid(3, false),
+                  _buildDashboardGrid(3),
                 ],
               ),
             ),
@@ -266,14 +341,14 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     ),
   );
 
-  Widget _buildSectionHeader({bool isCompact = false}) {
+  Widget _buildSectionHeader() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
+        const Text(
           'Overview',
           style: TextStyle(
-            fontSize: isCompact ? 20 : 26,
+            fontSize: 26,
             fontFamily: 'Inter',
             fontWeight: FontWeight.w700,
             color: Colors.black,
@@ -283,20 +358,20 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
         Row(
           children: [
             Container(
-              width: isCompact ? 4 : 12,
-              height: isCompact ? 24 : 43,
+              width: 12,
+              height: 43,
               decoration: ShapeDecoration(
                 color: _AppColors.tealLight,
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(isCompact ? 2 : 6),
+                  borderRadius: BorderRadius.circular(6),
                 ),
               ),
             ),
             const SizedBox(width: 12),
-            Text(
+            const Text(
               'Quick Actions',
               style: TextStyle(
-                fontSize: isCompact ? 18 : 33,
+                fontSize: 33,
                 fontFamily: 'Inter',
                 fontWeight: FontWeight.w700,
                 color: Colors.black,
@@ -308,37 +383,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     );
   }
 
-  Widget _buildDashboardGrid(int crossAxisCount, bool isMobile) {
-    final isCompact = isMobile || crossAxisCount == 2;
-
-    // Phone: plain column of full-width horizontal cards — natural height,
-    // no oversized near-square grid cells.
-    if (crossAxisCount == 1) {
-      return Column(
-        children: [
-          for (final card in _cards)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 14),
-              child: AdminAnimatedCard(
-                title: card.title,
-                subtitle: card.subtitle,
-                icon: card.icon,
-                color: card.color,
-                gradient: card.gradient,
-                compact: true,
-                onTap: () => _handleCardTap(card.title),
-                trailing: Icon(
-                  Icons.chevron_right_rounded,
-                  color: card.color,
-                  size: 24,
-                ),
-              ),
-            ),
-        ],
-      );
-    }
-
-    final childAspectRatio = crossAxisCount == 2 ? 3.0 : 1.6;
+  Widget _buildDashboardGrid(int crossAxisCount) {
+    final childAspectRatio = crossAxisCount == 1
+        ? 1.5
+        : (crossAxisCount == 2 ? 1.3 : 1.6);
 
     return GridView.builder(
       itemCount: _cards.length,
@@ -346,8 +394,8 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
       shrinkWrap: true,
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: crossAxisCount,
-        mainAxisSpacing: isCompact ? 14 : 42,
-        crossAxisSpacing: isCompact ? 18 : 55,
+        mainAxisSpacing: 42,
+        crossAxisSpacing: 55,
         childAspectRatio: childAspectRatio,
       ),
       itemBuilder: (context, idx) {
@@ -358,137 +406,75 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           icon: card.icon,
           color: card.color,
           gradient: card.gradient,
-          compact: isCompact,
           onTap: () => _handleCardTap(card.title),
-          trailing: isCompact
-              ? Icon(Icons.chevron_right_rounded, color: card.color, size: 24)
-              : null,
         );
       },
-    );
-  }
-
-  /// Mobile top bar — now a proper elevated surface (matches the AppBar
-  /// treatment on the teacher dashboard) instead of floating bare text
-  /// over the page background.
-  Widget _buildMobileTopBar() {
-    return Material(
-      elevation: 1,
-      color: Colors.white,
-      child: SafeArea(
-        bottom: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 12, 12),
-          child: Row(
-            children: [
-              Builder(
-                builder: (ctx) => IconButton(
-                  icon: const Icon(
-                    Icons.menu_rounded,
-                    color: _AppColors.tealDark,
-                  ),
-                  onPressed: () => Scaffold.of(ctx).openDrawer(),
-                  tooltip: 'Menu',
-                ),
-              ),
-              const SizedBox(width: 4),
-              Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [_AppColors.tealDark, _AppColors.teal],
-                  ),
-                  shape: BoxShape.circle,
-                ),
-                padding: const EdgeInsets.all(8),
-                child: const Icon(
-                  Icons.admin_panel_settings_rounded,
-                  color: Colors.white,
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Welcome, ${_username.isEmpty ? _adminName : _username}',
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                        color: _AppColors.textPrimary,
-                      ),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    Text(
-                      'Admin',
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const OfflineIndicator(),
-              AdminHeaderActions(
-                onRefresh: () => _loadUserData(forceRefresh: true),
-              ),
-            ],
-          ),
-        ),
-      ),
     );
   }
 
   Widget _buildStatsSection(bool isMobile) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isCompact = isMobile || constraints.maxWidth < 700;
+        final studentCard = _studentStatCard();
+        final teacherCard = _teacherStatCard();
+
         if (constraints.maxWidth < 700) {
           return Column(
-            children: [
-              _studentStatCard(isCompact: isCompact),
-              const SizedBox(height: 16),
-              _teacherStatCard(isCompact: isCompact),
-            ],
+            children: [studentCard, const SizedBox(height: 16), teacherCard],
           );
         }
         return Row(
           children: [
-            Expanded(child: _studentStatCard(isCompact: isCompact)),
+            Expanded(child: studentCard),
             const SizedBox(width: 16),
-            Expanded(child: _teacherStatCard(isCompact: isCompact)),
+            Expanded(child: teacherCard),
           ],
         );
       },
     );
-  }
+  }  Widget _buildStatsRow() => Row(
+        children: [
+          Expanded(child: _studentStatCard()),
+          const SizedBox(width: 24),
+          Expanded(child: _teacherStatCard()),
+        ],
+      );
 
-  Widget _buildStatsRow() => Row(
-    children: [
-      Expanded(child: _studentStatCard()),
-      const SizedBox(width: 24),
-      Expanded(child: _teacherStatCard()),
-    ],
-  );
+  Widget _buildStatsErrorHint() => Row(
+        children: [
+          const Icon(
+            Icons.cloud_off_rounded,
+            size: 16,
+            color: _AppColors.textMuted,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _statsError!,
+              style: const TextStyle(
+                fontSize: 13,
+                color: _AppColors.textMuted,
+                fontFamily: 'Inter',
+              ),
+            ),
+          ),
+        ],
+      );
 
-  Widget _studentStatCard({bool isCompact = false}) => _buildStatCard(
+  Widget _studentStatCard() => _buildStatCard(
     value: _studentCount.toString(),
     label: 'Total Students',
     iconColor: const Color(0xFF14DCCA),
     gradientColors: [const Color(0xFF65E8E1), Colors.white],
     borderColor: _AppColors.teal,
-    isCompact: isCompact,
   );
 
-  Widget _teacherStatCard({bool isCompact = false}) => _buildStatCard(
+  Widget _teacherStatCard() => _buildStatCard(
     value: _teacherCount.toString(),
     label: 'Total Teachers',
     iconColor: const Color(0xFF22C55E),
     gradientColors: [const Color(0xFFA8E6A7), Colors.white],
     borderColor: const Color(0xFF1EBA57),
-    isCompact: isCompact,
   );
 
   Widget _buildStatCard({
@@ -497,11 +483,10 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
     required Color iconColor,
     required List<Color> gradientColors,
     required Color borderColor,
-    bool isCompact = false,
   }) {
     return Container(
-      height: isCompact ? 100 : 108,
-      padding: EdgeInsets.symmetric(horizontal: isCompact ? 12 : 24),
+      height: 108,
+      padding: const EdgeInsets.symmetric(horizontal: 24),
       decoration: ShapeDecoration(
         gradient: LinearGradient(
           begin: const Alignment(-0.13, 0),
@@ -512,28 +497,21 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
           side: BorderSide(width: 2, color: borderColor),
           borderRadius: BorderRadius.circular(23),
         ),
-        shadows: [
-          BoxShadow(
-            color: borderColor.withOpacity(0.15),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
       ),
       child: Row(
         children: [
           Container(
-            width: isCompact ? 52 : 68,
-            height: isCompact ? 52 : 68,
+            width: 68,
+            height: 68,
             decoration: BoxDecoration(color: iconColor, shape: BoxShape.circle),
             padding: const EdgeInsets.all(10),
-            child: Icon(
+            child: const Icon(
               Icons.bar_chart_rounded,
               color: Colors.white,
-              size: isCompact ? 24 : 28,
+              size: 28,
             ),
           ),
-          SizedBox(width: isCompact ? 12 : 38),
+          const SizedBox(width: 38),
           Expanded(
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -544,9 +522,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                   alignment: Alignment.centerLeft,
                   child: Text(
                     value,
-                    style: TextStyle(
+                    style: const TextStyle(
                       color: Colors.black,
-                      fontSize: isCompact ? 28 : 40,
+                      fontSize: 40,
                       fontFamily: 'Inter',
                       fontWeight: FontWeight.w700,
                     ),
@@ -554,9 +532,9 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 ),
                 Text(
                   label,
-                  style: TextStyle(
+                  style: const TextStyle(
                     color: _AppColors.textMuted,
-                    fontSize: isCompact ? 13 : 17,
+                    fontSize: 17,
                     fontFamily: 'Inter',
                   ),
                   maxLines: 1,
@@ -606,14 +584,15 @@ class _AdminDashboardPageState extends State<AdminDashboardPage> {
                 overflow: TextOverflow.ellipsis,
               ),
               const SizedBox(height: 4),
-              Text(
-                '@$_username',
-                style: const TextStyle(
-                  fontSize: 16,
-                  color: _AppColors.textMuted,
-                  fontFamily: 'Inter',
+              if (_username.isNotEmpty)
+                Text(
+                  '@$_username',
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: _AppColors.textMuted,
+                    fontFamily: 'Inter',
+                  ),
                 ),
-              ),
             ],
           ),
         ),

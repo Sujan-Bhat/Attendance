@@ -2,7 +2,6 @@ import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
-import '../config/api_config.dart';
 import '../core/api_client.dart';
 import 'storage_service.dart';
 
@@ -56,10 +55,16 @@ class BulkValidateResult {
   final int total;
   final List<BulkRow> rows;
 
+  /// Batch-level failure (weak default password, unreadable file, network
+  /// error). Without this the backend's `error` payload was silently dropped
+  /// and a failed validation looked identical to a passing one.
+  final String? error;
+
   BulkValidateResult({
     required this.valid,
     required this.total,
     required this.rows,
+    this.error,
   });
 
   int get validCount => rows.where((r) => !r.hasErrors).length;
@@ -67,22 +72,12 @@ class BulkValidateResult {
 }
 
 /// Handles bulk student creation from an Excel-like upload.
-///
-/// While [bulkMockMode] is `true` the real endpoints are NOT called; instead
-/// a canned dataset is returned so the whole UI flow can be exercised before
-/// the backend bulk endpoints exist. Flip it to `false` once those endpoints
-/// are in place.
 class BulkStudentsService {
   final Dio _dio = ApiClient().dio;
 
-  /// Temporary switch: `true` until the backend bulk endpoints are live.
-  static const bool bulkMockMode = false;
-
-  BulkStudentsService() {
-    _dio.options.baseUrl = ApiConfig.baseUrl;
-    _dio.options.connectTimeout = ApiConfig.connectionTimeout;
-    _dio.options.receiveTimeout = ApiConfig.receiveTimeout;
-  }
+  /// Dio is a shared singleton already configured by ApiClient; never mutate
+  /// its options here (see ClassService).
+  BulkStudentsService();
 
   Future<String?> _getToken() async {
     return await StorageService.read(key: 'access_token');
@@ -94,11 +89,6 @@ class BulkStudentsService {
     required String fileName,
     required String defaultPassword,
   }) async {
-    if (bulkMockMode) {
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-      return _mockValidateRows(defaultPassword: defaultPassword);
-    }
-
     try {
       final token = await _getToken();
       final formData = FormData.fromMap({
@@ -115,14 +105,9 @@ class BulkStudentsService {
       return BulkValidateResult(
         valid: false,
         total: 0,
-        rows: [],
-      )..rows.add(BulkRow(
-          row: 0,
-          name: '',
-          email: '',
-          semester: '',
-          errors: {'name': 'Could not read that file. ${_friendlyError(e)}'},
-        ));
+        rows: const [],
+        error: apiErrorMessage(e, 'Could not read that file.'),
+      );
     }
   }
 
@@ -131,11 +116,6 @@ class BulkStudentsService {
     required List<BulkRow> rows,
     required String defaultPassword,
   }) async {
-    if (bulkMockMode) {
-      await Future<void>.delayed(const Duration(milliseconds: 500));
-      return _mockValidateRows(rows: rows, defaultPassword: defaultPassword);
-    }
-
     try {
       final token = await _getToken();
       final response = await _dio.post(
@@ -148,10 +128,14 @@ class BulkStudentsService {
       );
       return _parseValidateResponse(response.data);
     } catch (e) {
+      // Surface the failure instead of returning error-free rows: otherwise
+      // the review step would show "N students ready to add" after a call
+      // that never actually ran.
       return BulkValidateResult(
         valid: false,
         total: rows.length,
         rows: rows,
+        error: apiErrorMessage(e, 'Could not re-validate the rows'),
       );
     }
   }
@@ -161,22 +145,6 @@ class BulkStudentsService {
     required List<BulkRow> rows,
     required String defaultPassword,
   }) async {
-    if (bulkMockMode) {
-      await Future<void>.delayed(const Duration(milliseconds: 700));
-      final validRows = rows.where((r) => !r.hasErrors).toList();
-      return {
-        'success': true,
-        'created': validRows.length,
-        'users': validRows
-            .map((r) => {
-                  'username': r.name,
-                  'email': r.email,
-                  'semester': r.semester,
-                })
-            .toList(),
-      };
-    }
-
     try {
       final token = await _getToken();
       final response = await _dio.post(
@@ -191,19 +159,21 @@ class BulkStudentsService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': (e.response?.data is Map &&
-                (e.response?.data as Map)['error'] != null)
-            ? (e.response?.data as Map)['error'].toString()
-            : 'Failed to create students',
+        'error': apiErrorMessage(e, 'Failed to create students'),
       };
     } catch (e) {
-      return {'success': false, 'error': _friendlyError(e)};
+      return {'success': false, 'error': apiErrorMessage(e, e.toString())};
     }
   }
 
   BulkValidateResult _parseValidateResponse(dynamic data) {
     if (data is! Map) {
-      return BulkValidateResult(valid: false, total: 0, rows: []);
+      return BulkValidateResult(
+        valid: false,
+        total: 0,
+        rows: const [],
+        error: 'Unexpected response from the server',
+      );
     }
     final rawRows = data['rows'];
     final rows = <BulkRow>[];
@@ -212,78 +182,14 @@ class BulkStudentsService {
         rawRows.whereType<Map>().map((m) => BulkRow.fromJson(Map<String, dynamic>.from(m))),
       );
     }
+    // The backend reports batch-level problems (e.g. "Default password must
+    // be at least 6 characters") in `error`, alongside otherwise valid rows.
+    final batchError = data['error'];
     return BulkValidateResult(
       valid: data['valid'] == true,
       total: (data['total'] as num?)?.toInt() ?? rows.length,
       rows: rows,
+      error: batchError is String && batchError.isNotEmpty ? batchError : null,
     );
-  }
-
-  BulkValidateResult _mockValidateRows({
-    List<BulkRow>? rows,
-    required String defaultPassword,
-  }) {
-    List<BulkRow> workingRows;
-    if (rows == null) {
-      workingRows = [
-        BulkRow(row: 2, name: 'Aisha Rahman', email: 'aisha.rahman@example.com', semester: '3'),
-        BulkRow(row: 3, name: 'Rajesh Kumar', email: 'rajesh.kumar@example.com', semester: '2'),
-        BulkRow(row: 4, name: '', email: 'priya.sharma@example.com', semester: '2'),
-        BulkRow(row: 5, name: 'Rahul Verma', email: 'not-an-email', semester: '4'),
-        BulkRow(row: 6, name: 'Priya Sharma', email: 'priya.sharma@example.com', semester: '1'),
-        BulkRow(row: 7, name: 'Neha Singh', email: 'neha.singh@example.com', semester: ''),
-        BulkRow(row: 8, name: 'Karan Mehta', email: 'karan.mehta@example.com', semester: '5'),
-      ];
-    } else {
-      workingRows = List.of(rows);
-    }
-
-    final seenEmails = <String>{};
-    final duplicateEmails = <String>{};
-    for (final r in workingRows) {
-      if (r.email.isEmpty) continue;
-      if (!seenEmails.add(r.email)) {
-        duplicateEmails.add(r.email);
-      }
-    }
-
-    for (final r in workingRows) {
-      r.errors.clear();
-      if (r.name.trim().isEmpty) {
-        r.errors['name'] = 'Name is required';
-      }
-      final email = r.email.trim();
-      if (email.isEmpty) {
-        r.errors['email'] = 'Email is required';
-      } else if (!email.contains('@')) {
-        r.errors['email'] = 'Enter a valid email';
-      } else if (duplicateEmails.contains(email)) {
-        r.errors['email'] = 'Email appears more than once in the file';
-      }
-      if (r.semester.trim().isEmpty) {
-        r.errors['semester'] = 'Semester is required';
-      }
-    }
-
-    return BulkValidateResult(
-      total: workingRows.length,
-      rows: workingRows,
-      valid: workingRows.every((r) => !r.hasErrors),
-    );
-  }
-
-  String _friendlyError(Object error) {
-    if (error is DioException) {
-      if (error.type == DioExceptionType.connectionError ||
-          error.type == DioExceptionType.connectionTimeout) {
-        return 'Could not reach the server';
-      }
-      final data = error.response?.data;
-      if (data is Map && data['error'] != null) {
-        return data['error'].toString();
-      }
-      return error.message ?? 'Request failed';
-    }
-    return error.toString();
   }
 }

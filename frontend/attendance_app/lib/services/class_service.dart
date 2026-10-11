@@ -10,39 +10,19 @@ class ClassService {
 
   final String baseUrl = ApiConfig.baseUrl;
 
-  ClassService() {
-    _dio.options.baseUrl = baseUrl;
-    _dio.options.connectTimeout = ApiConfig.connectionTimeout;
-    _dio.options.receiveTimeout = ApiConfig.receiveTimeout;
-  }
+  /// Dio is a shared singleton (see [ApiClient]) that is already configured
+  /// with [ApiConfig.baseUrl] and timeouts. Service constructors must NOT
+  /// mutate `dio.options` — a value set here (e.g. a long export timeout)
+  /// would silently apply to every other request in the app.
+  ClassService();
+
+  /// Semesters are free-form labels interpolated into the path, and
+  /// `<str:…>` route converters do not match `/`. Encoding keeps labels such
+  /// as "Sem 1/2" from turning every drill-down into a silent 404.
+  String _enc(String value) => Uri.encodeComponent(value);
 
   Future<String?> _getToken() async {
     return await StorageService.read(key: 'access_token');
-  }
-
-  /// Check if student exists by email (for auto-fill feature)
-  Future<Map<String, dynamic>?> checkStudentByEmail(String email) async {
-    try {
-      final token = await _getToken();
-
-      if (token == null) {
-        throw Exception('Not authenticated');
-      }
-
-      final response = await _dio.get(
-        '/auth/check-student/',
-        queryParameters: {'email': email},
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-
-      if (response.statusCode == 200 && response.data['exists'] == true) {
-        return response.data['student'];
-      }
-      return null;
-    } on DioException catch (e) {
-      print('Check student error: ${e.message}');
-      return null;
-    }
   }
 
   /// Create a new class with students
@@ -70,16 +50,10 @@ class ClassService {
 
       return {'success': false, 'message': 'Failed to create class'};
     } on DioException catch (e) {
-      String errorMessage = 'Failed to create class';
-
-      if (e.response != null) {
-        final data = e.response!.data;
-        if (data is Map && data.containsKey('error')) {
-          errorMessage = data['error'];
-        }
-      }
-
-      return {'success': false, 'message': errorMessage};
+      return {
+        'success': false,
+        'message': apiErrorMessage(e, 'Failed to create class'),
+      };
     }
   }
 
@@ -117,7 +91,10 @@ class ClassService {
     return [];
   }
 
-  /// Admin: Get all classes grouped by semester with student counts
+  /// Admin: Get all classes grouped by semester with student counts.
+  ///
+  /// Throws on failure: an admin screen must be able to tell "the request
+  /// failed" apart from "there is genuinely nothing here".
   Future<List<Map<String, dynamic>>> getAdminClassesSummary() async {
     try {
       final token = await _getToken();
@@ -132,9 +109,11 @@ class ClassService {
       }
 
       return [];
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching admin classes summary: $e');
-      return [];
+      rethrow;
     }
   }
 
@@ -144,7 +123,7 @@ class ClassService {
       final token = await _getToken();
 
       final response = await _dio.get(
-        '/admin/classes/by-semester/$semester/',
+        '/admin/classes/by-semester/${_enc(semester)}/',
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
 
@@ -153,9 +132,11 @@ class ClassService {
       }
 
       return {};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching semester classes: $e');
-      return {};
+      rethrow;
     }
   }
 
@@ -165,7 +146,7 @@ class ClassService {
       final token = await _getToken();
 
       final response = await _dio.get(
-        '/admin/students/by-semester/$semester/',
+        '/admin/students/by-semester/${_enc(semester)}/',
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
 
@@ -174,9 +155,11 @@ class ClassService {
       }
 
       return {};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching semester students: $e');
-      return {};
+      rethrow;
     }
   }
 
@@ -194,10 +177,12 @@ class ClassService {
         return response.data;
       }
 
-      return {'students': [], 'total': 0};
+      return {'students': [], 'unreachable': [], 'total': 0};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching unassigned students: $e');
-      return {'students': [], 'total': 0};
+      rethrow;
     }
   }
 
@@ -216,9 +201,11 @@ class ClassService {
       }
 
       return {};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching teachers: $e');
-      return {};
+      rethrow;
     }
   }
 
@@ -361,7 +348,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'message': e.response?.data['error'] ?? 'Failed to add student',
+        'message': apiErrorMessage(e, 'Failed to add student'),
       };
     }
   }
@@ -427,7 +414,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to create user',
+        'error': apiErrorMessage(e, 'Failed to create user'),
       };
     }
   }
@@ -446,7 +433,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to delete user',
+        'error': apiErrorMessage(e, 'Failed to delete user'),
       };
     }
   }
@@ -465,7 +452,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to delete student',
+        'error': apiErrorMessage(e, 'Failed to delete student'),
       };
     }
   }
@@ -476,7 +463,7 @@ class ClassService {
       final token = await _getToken();
 
       final response = await _dio.delete(
-        '/admin/students/delete-all/$semester/',
+        '/admin/students/delete-all/${_enc(semester)}/',
         data: {'confirm': true},
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
@@ -485,7 +472,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to delete students',
+        'error': apiErrorMessage(e, 'Failed to delete students'),
       };
     }
   }
@@ -532,28 +519,6 @@ class ClassService {
     }
   }
 
-  /// Update student in class
-  Future<bool> updateStudentInClass({
-    required int classId,
-    required int studentId,
-  }) async {
-    try {
-      final token = await _getToken();
-
-      // You'll need to add this endpoint in backend
-      final response = await _dio.put(
-        '/classes/$classId/update-student/$studentId/',
-        data: {},
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-
-      return response.statusCode == 200;
-    } catch (e) {
-      print('Error updating student: $e');
-      return false;
-    }
-  }
-
   /// Admin: Update student's name, email
   Future<Map<String, dynamic>> updateStudentDetails({
     required int studentId,
@@ -576,7 +541,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to update student',
+        'error': apiErrorMessage(e, 'Failed to update student'),
       };
     }
   }
@@ -603,7 +568,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to update teacher',
+        'error': apiErrorMessage(e, 'Failed to update teacher'),
       };
     }
   }
@@ -634,7 +599,7 @@ class ClassService {
     } on DioException catch (e) {
       return {
         'success': false,
-        'error': e.response?.data['error'] ?? 'Failed to update class',
+        'error': apiErrorMessage(e, 'Failed to update class'),
       };
     }
   }
@@ -654,9 +619,11 @@ class ClassService {
       }
 
       return {};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching admin class detail: $e');
-      return {};
+      rethrow;
     }
   }
 
@@ -675,30 +642,11 @@ class ClassService {
       }
 
       return {};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching admin stats: $e');
-      return {};
-    }
-  }
-
-  /// Admin: Get users by role (teachers or students)
-  Future<Map<String, dynamic>> getUsersByRole(String role) async {
-    try {
-      final token = await _getToken();
-
-      final response = await _dio.get(
-        '/admin/users/$role/',
-        options: Options(headers: {'Authorization': 'Bearer $token'}),
-      );
-
-      if (response.statusCode == 200) {
-        return response.data;
-      }
-
-      return {};
-    } catch (e) {
-      print('Error fetching $role: $e');
-      return {};
+      rethrow;
     }
   }
 
@@ -718,9 +666,11 @@ class ClassService {
       }
 
       return [];
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching attendance semesters: $e');
-      return [];
+      rethrow;
     }
   }
 
@@ -731,7 +681,7 @@ class ClassService {
       final token = await _getToken();
 
       final response = await _dio.get(
-        '/admin/attendance/by-semester/$semester/',
+        '/admin/attendance/by-semester/${_enc(semester)}/',
         options: Options(headers: {'Authorization': 'Bearer $token'}),
       );
 
@@ -740,9 +690,11 @@ class ClassService {
       }
 
       return {};
+    } on DioException {
+      rethrow;
     } catch (e) {
       print('Error fetching attendance by semester: $e');
-      return {};
+      rethrow;
     }
   }
 
@@ -766,16 +718,6 @@ class ClassService {
     throw Exception('Failed to toggle user access');
   }
 
-  /// Admin: Block a user (prevent login + invalidate their sessions).
-  Future<Map<String, dynamic>> blockUser(int userId) async {
-    return toggleUserAccess(userId);
-  }
-
-  /// Admin: Unblock a previously blocked user.
-  Future<Map<String, dynamic>> unblockUser(int userId) async {
-    return toggleUserAccess(userId);
-  }
-
   Future<Map<String, dynamic>> joinClass(String classCode) async {
     try {
       final token = await _getToken();
@@ -790,10 +732,10 @@ class ClassService {
       return {'success': false, 'message': 'Failed to join class'};
     } catch (e) {
       print('Error joining class: $e');
-      if (e is DioException && e.response != null) {
+      if (e is DioException) {
         return {
           'success': false,
-          'message': e.response?.data['error'] ?? 'Unknown error',
+          'message': apiErrorMessage(e, 'Unknown error'),
         };
       }
       return {'success': false, 'message': e.toString()};

@@ -156,7 +156,8 @@ class _IndividualStudentTabState extends State<_IndividualStudentTab> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _customSemesterController = TextEditingController();
-  static const _presetSemesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  static const _fallbackSemesters = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  List<String> _presetSemesters = _fallbackSemesters;
   String? _selectedSemester = '1';
   bool _useCustomSemester = false;
   bool _isSaving = false;
@@ -168,6 +169,39 @@ class _IndividualStudentTabState extends State<_IndividualStudentTab> {
   // preset mode, the custom field when "Other…" is chosen.
   String? _dropdownSemesterError;
   String? _customSemesterError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSemesterOptions();
+  }
+
+  /// Populate the dropdown from the admin classes summary so the options
+  /// mirror the semesters that actually exist; falls back to 1–8 if the
+  /// fetch fails or returns nothing.
+  Future<void> _loadSemesterOptions() async {
+    List<Map<String, dynamic>> summary;
+    try {
+      summary = await widget.classService.getAdminClassesSummary();
+    } catch (_) {
+      return; // keep fallback list
+    }
+    if (!mounted) return;
+
+    final semesters = summary
+        .map((s) => s['semester']?.toString() ?? '')
+        .where((s) => s.isNotEmpty)
+        .toList();
+    if (semesters.isEmpty) return;
+
+    setState(() {
+      _presetSemesters = semesters;
+      if (_selectedSemester != null &&
+          !semesters.contains(_selectedSemester)) {
+        _selectedSemester = semesters.first;
+      }
+    });
+  }
 
   @override
   void dispose() {
@@ -300,7 +334,7 @@ class _IndividualStudentTabState extends State<_IndividualStudentTab> {
 
   Widget _buildSemesterDropdown() {
     return DropdownButtonFormField<String>(
-      value: _useCustomSemester ? 'custom' : _selectedSemester,
+      initialValue: _useCustomSemester ? 'custom' : _selectedSemester,
       isExpanded: true,
       style: const TextStyle(fontSize: 17),
       decoration: InputDecoration(
@@ -396,19 +430,25 @@ class _IndividualStudentTabState extends State<_IndividualStudentTab> {
       semester: semester,
     );
     if (!mounted) return;
-    Navigator.of(context).pop();
     if (result['error'] != null) {
+      // Keep the form open: popping first discarded everything the admin had
+      // typed on every rejected create.
+      setState(() => _isSaving = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(result['error']), backgroundColor: Colors.red),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Student created successfully'),
-          backgroundColor: DialogColors.tealDark,
+        SnackBar(
+          content: Text(result['error'].toString()),
+          backgroundColor: Colors.red,
         ),
       );
-      widget.onStudentCreated();
+      return;
     }
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Student created successfully'),
+        backgroundColor: DialogColors.tealDark,
+      ),
+    );
+    widget.onStudentCreated();
   }
 }

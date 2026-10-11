@@ -2,6 +2,7 @@ import json
 import uuid
 import re
 from collections import OrderedDict
+from io import BytesIO
 from rest_framework import generics, permissions, status
 from rest_framework.response import Response
 from rest_framework.decorators import api_view, permission_classes
@@ -990,3 +991,215 @@ def admin_attendance_by_semester(request, semester):
         'total_records': sum(c['record_count'] for c in by_class),
         'classes': by_class,
     })
+
+
+# ---------------------------------------------------------------------------
+# Admin exports (PDF / Excel)
+# ---------------------------------------------------------------------------
+
+def _build_workbook(title, headers, rows):
+    """Build an in-memory xlsx with a styled header row; returns bytes."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, PatternFill, Alignment
+    from openpyxl.utils import get_column_letter
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = title[:31] or 'Sheet1'
+
+    ws.append([title])
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max(len(headers), 1))
+    title_cell = ws.cell(row=1, column=1)
+    title_cell.font = Font(bold=True, size=13)
+    ws.append([])
+
+    header_fill = PatternFill('solid', fgColor='007C91')
+    for col, header in enumerate(headers, start=1):
+        cell = ws.cell(row=3, column=col, value=header)
+        cell.font = Font(bold=True, color='FFFFFF')
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal='center')
+
+    for row in rows:
+        ws.append(list(row))
+
+    for col, header in enumerate(headers, start=1):
+        max_len = len(str(header))
+        for row_idx in range(4, ws.max_row + 1):
+            value = ws.cell(row=row_idx, column=col).value
+            if value is not None:
+                max_len = max(max_len, min(len(str(value)), 60))
+        ws.column_dimensions[get_column_letter(col)].width = min(max_len + 4, 62)
+
+    ws.freeze_panes = 'A4'
+
+    buffer = BytesIO()
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+def _build_pdf(title, headers, rows):
+    """Build an in-memory A4 PDF table (landscape when wide); returns bytes."""
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4, landscape
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
+    from reportlab.lib.units import mm
+    from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+
+    style = getSampleStyleSheet()
+    heading = style['Heading2']
+    heading.alignment = 1
+
+    # Separate style objects: sharing style['BodyText'] between body and
+    # header made the white header textColor apply to body cells too.
+    cell_style = ParagraphStyle(
+        'ExportCell',
+        parent=style['BodyText'],
+        fontSize=8,
+        leading=10,
+        spaceAfter=0,
+        textColor=colors.black,
+    )
+
+    header_style = ParagraphStyle(
+        'ExportHeader',
+        parent=style['BodyText'],
+        fontSize=8,
+        leading=10,
+        spaceAfter=0,
+        fontName='Helvetica-Bold',
+        textColor=colors.white,
+    )
+
+    page_size = landscape(A4) if len(headers) > 5 else A4
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=page_size,
+        leftMargin=12 * mm,
+        rightMargin=12 * mm,
+        topMargin=14 * mm,
+        bottomMargin=14 * mm,
+        title=title,
+    )
+
+    usable = doc.width
+    col_widths = []
+    for idx in range(len(headers)):
+        sample_max = max([len(str(headers[idx]))] + [len(str(r[idx])) for r in rows[:50]] or [1])
+        col_widths.append(max(sample_max, 8))
+    total = sum(col_widths)
+    col_widths = [usable * w / total for w in col_widths]
+
+    table_rows = [[Paragraph(str(h), header_style) for h in headers]]
+    for row in rows:
+        table_rows.append([Paragraph('' if v is None else str(v), cell_style) for v in row])
+
+    table = Table(table_rows, colWidths=col_widths, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#007C91')),
+        ('GRID', (0, 0), (-1, -1), 0.4, colors.HexColor('#B8C4CC')),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#F2F7F9')]),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('LEFTPADDING', (0, 0), (-1, -1), 4),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 4),
+    ]))
+
+    doc.build([Paragraph(title, heading), Spacer(1, 6), table])
+    return buffer.getvalue()
+
+
+@api_view(['GET'])
+@permission_classes([permissions.IsAuthenticated])
+def admin_export(request, dataset, file_format):
+    """
+    Admin: export details as PDF or Excel.
+
+    GET /api/v1/admin/export/<dataset>/<format>/
+      dataset: students | teachers | classes | attendance
+      format:  pdf | xlsx
+    Optional query param for attendance: ?semester=<label>
+    """
+    if request.user.role != 'admin':
+        return Response({'error': 'Forbidden'}, status=status.HTTP_403_FORBIDDEN)
+
+    if file_format not in ('pdf', 'xlsx'):
+        return Response({'error': 'Invalid format'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if dataset == 'students':
+        title = 'Student Details'
+        headers = ['ID', 'Username', 'Full Name', 'Email', 'Semester', 'Classes', 'Status']
+        rows = []
+        for u in User.objects.filter(role='student').order_by('username'):
+            profile = getattr(u, 'student_profile', None)
+            semester = (profile.semester if profile else '') or '—'
+            codes = ', '.join(
+                e.class_obj.class_code for e in u.enrolled_classes.select_related('class_obj')
+            ) or '—'
+            rows.append([
+                u.id, u.username, u.get_full_name() or u.username, u.email,
+                semester, codes, 'Active' if u.is_active else 'Blocked',
+            ])
+    elif dataset == 'teachers':
+        title = 'Teacher Details'
+        headers = ['ID', 'Username', 'Full Name', 'Email', 'Classes Taught', 'Status']
+        rows = []
+        for u in User.objects.filter(role='teacher').order_by('username'):
+            codes = ', '.join(c.class_code for c in u.classes_taught.all()) or '—'
+            rows.append([
+                u.id, u.username, u.get_full_name() or u.username, u.email,
+                codes, 'Active' if u.is_active else 'Blocked',
+            ])
+    elif dataset == 'classes':
+        title = 'Class Details'
+        headers = ['Code', 'Name', 'Semester', 'Teacher', 'Students', 'Sessions']
+        rows = []
+        for c in Class.objects.select_related('teacher').all().order_by('class_code'):
+            rows.append([
+                c.class_code, c.class_name, c.semester,
+                c.teacher.get_full_name() or c.teacher.username,
+                c.student_count, c.sessions.count(),
+            ])
+    elif dataset == 'attendance':
+        semester = (request.query_params.get('semester') or '').strip()
+        title = 'Attendance Details' + (f' - Semester {semester}' if semester else '')
+        headers = ['Semester', 'Class', 'Date', 'Time', 'Teacher', 'Student', 'Email', 'Status']
+        records = (
+            AttendanceRecord.objects
+            .select_related('session__class_obj', 'session__teacher', 'student')
+            .order_by('session__start_time', 'marked_at')
+        )
+        if semester:
+            records = records.filter(session__class_obj__semester=semester)
+        rows = []
+        for r in records:
+            session = r.session
+            rows.append([
+                session.class_obj.semester,
+                session.class_obj.class_code,
+                timezone.localtime(session.start_time).strftime('%d %b %Y'),
+                timezone.localtime(r.marked_at).strftime('%H:%M'),
+                session.teacher.username,
+                r.student.username,
+                r.student.email,
+                (r.status or '').replace('_', ' ').title() or '—',
+            ])
+    else:
+        return Response({'error': 'Invalid dataset'}, status=status.HTTP_400_BAD_REQUEST)
+
+    stamp = timezone.localtime().strftime('%Y%m%d_%H%M')
+    filename = f'{dataset}_details_{stamp}.{file_format}'
+
+    if file_format == 'xlsx':
+        content = _build_workbook(title, headers, rows)
+        content_type = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    else:
+        content = _build_pdf(title, headers, rows)
+        content_type = 'application/pdf'
+
+    from django.http import HttpResponse
+    response = HttpResponse(content, content_type=content_type)
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response

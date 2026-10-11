@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../core/api_client.dart';
 import '../../services/class_service.dart';
 import '../../widgets/admin_web_layout.dart';
 import 'admin_class_detail_screen.dart';
+import 'admin_navigation.dart';
+import 'widgets/admin_export_button.dart';
 
 abstract class _AppColors {
   static const tealDark = Color(0xFF007C91);
@@ -126,11 +129,7 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            e.toString().contains('Superuser')
-                ? 'Superuser accounts cannot be blocked here'
-                : 'Could not update user access',
-          ),
+          content: Text(apiErrorMessage(e, 'Could not update user access')),
           backgroundColor: Colors.red,
         ),
       );
@@ -248,6 +247,27 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
+              // showMobileAppBar is false for this screen, so the drawer is
+              // otherwise unreachable on a phone — expose it here.
+              if (isMobile)
+                Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Builder(
+                    builder: (ctx) => IconButton(
+                      icon: const Icon(
+                        Icons.menu_rounded,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                      onPressed: () => Scaffold.of(ctx).openDrawer(),
+                      tooltip: 'Menu',
+                    ),
+                  ),
+                ),
               Container(
                 decoration: BoxDecoration(
                   color: Colors.white.withOpacity(0.2),
@@ -259,7 +279,7 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
                     color: Colors.white,
                     size: 24,
                   ),
-                  onPressed: () => Navigator.pop(context),
+                  onPressed: () => backToAdminDashboard(context),
                   tooltip: 'Back',
                 ),
               ),
@@ -321,6 +341,10 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
               onPressed: _showAddTeacherDialog,
               tooltip: 'Add Teacher',
             ),
+          ),
+          const AdminExportButton(
+            dataset: 'teachers',
+            color: Colors.white,
           ),
         ],
       );
@@ -656,16 +680,6 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
               ),
             ),
           ),
-          Expanded(
-            child: Text(
-              'Classes',
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 15,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-          ),
           SizedBox(
             width: 70,
             child: Text(
@@ -677,7 +691,18 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
               ),
             ),
           ),
-          SizedBox(width: 48),
+          Expanded(
+            child: Text(
+              'Classes',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 15,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          // Reserved space for the four 48px action buttons each row has.
+          SizedBox(width: 192),
         ],
       ),
     );
@@ -1007,17 +1032,30 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
     );
   }
 
-  void _openClassDetail(Map<String, dynamic> cls) {
-    Navigator.push(
+  Future<void> _openClassDetail(Map<String, dynamic> cls) async {
+    final classId = int.tryParse(cls['id']?.toString() ?? '');
+    if (classId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot open class: id missing'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    await Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => AdminClassDetailScreen(
-          classId: cls['id'],
+          classId: classId,
           classCode: cls['class_code'] ?? '',
           className: cls['class_name'] ?? '',
         ),
       ),
     );
+    // Detail edits (rename, reassign, remove student) change the class
+    // lists shown here; refresh on return.
+    if (mounted) _loadTeachers();
   }
 
   void _showAddTeacherDialog() {
@@ -1102,24 +1140,28 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
                             password: password,
                             role: 'teacher',
                           );
+                          if (!mounted) return;
                           if (!ctx.mounted) return;
-                          Navigator.pop(ctx);
                           if (result['error'] != null) {
+                            // Keep the form open: popping first lost every
+                            // typed value on a rejected create.
+                            setDialogState(() => isSaving = false);
                             ScaffoldMessenger.of(this.context).showSnackBar(
                               SnackBar(
-                                content: Text(result['error']),
+                                content: Text(result['error'].toString()),
                                 backgroundColor: Colors.red,
                               ),
                             );
-                          } else {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Teacher created successfully'),
-                                backgroundColor: Color(0xFF007C91),
-                              ),
-                            );
-                            _loadTeachers();
+                            return;
                           }
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Teacher created successfully'),
+                              backgroundColor: Color(0xFF007C91),
+                            ),
+                          );
+                          _loadTeachers();
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _AppColors.tealDark,
@@ -1206,30 +1248,44 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
                             return;
                           }
 
-                          setDialogState(() => isSaving = true);
-                          final result = await _classService.updateTeacherDetails(
-                            teacherId: teacher['id'],
-                            username: name,
-                            email: email,
-                          );
-                          if (!ctx.mounted) return;
-                          Navigator.pop(ctx);
-                          if (result['error'] != null) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              SnackBar(
-                                content: Text(result['error']),
+                          final teacherId =
+                              int.tryParse(teacher['id']?.toString() ?? '');
+                          if (teacherId == null) {
+                            ScaffoldMessenger.of(ctx).showSnackBar(
+                              const SnackBar(
+                                content: Text('Cannot edit: teacher id missing'),
                                 backgroundColor: Colors.red,
                               ),
                             );
-                          } else {
+                            return;
+                          }
+
+                          setDialogState(() => isSaving = true);
+                          final result = await _classService.updateTeacherDetails(
+                            teacherId: teacherId,
+                            username: name,
+                            email: email,
+                          );
+                          if (!mounted) return;
+                          if (!ctx.mounted) return;
+                          if (result['error'] != null) {
+                            setDialogState(() => isSaving = false);
                             ScaffoldMessenger.of(this.context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Teacher updated successfully'),
-                                backgroundColor: Color(0xFF007C91),
+                              SnackBar(
+                                content: Text(result['error'].toString()),
+                                backgroundColor: Colors.red,
                               ),
                             );
-                            _loadTeachers();
+                            return;
                           }
+                          Navigator.pop(ctx);
+                          ScaffoldMessenger.of(this.context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Teacher updated successfully'),
+                              backgroundColor: Color(0xFF007C91),
+                            ),
+                          );
+                          _loadTeachers();
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _AppColors.tealDark,
@@ -1255,17 +1311,29 @@ class _ManageTeachersScreenState extends State<ManageTeachersScreen> {
   }
 
   void _showReassignClassDialog(Map<String, dynamic> cls, Map<String, dynamic> currentTeacher) {
-    final classId = cls['id'];
-    if (classId == null) return;
+    final classId = int.tryParse(cls['id']?.toString() ?? '');
+    if (classId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot reassign: class id missing'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
 
     final className = cls['class_name'] ?? '';
     final classCode = cls['class_code'] ?? '';
     final currentName = currentTeacher['username'] ?? 'Unknown';
 
-    final candidateTeachers = _teachers.where((t) =>
-      t != currentTeacher &&
-      _teacherIdOf(t) != _teacherIdOf(currentTeacher)
-    ).toList();
+    // Exclude null-id teachers so the forced unwraps below are safe and a
+    // malformed record can't crash the dialog for everyone.
+    final candidateTeachers = _teachers.where((t) {
+      final id = _teacherIdOf(t);
+      return id != null &&
+          t != currentTeacher &&
+          id != _teacherIdOf(currentTeacher);
+    }).toList();
 
     if (candidateTeachers.isEmpty) {
       showDialog(

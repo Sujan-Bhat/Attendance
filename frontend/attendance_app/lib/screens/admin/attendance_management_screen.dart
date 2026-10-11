@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../services/class_service.dart';
+import '../../utils/semester_utils.dart';
 import '../../widgets/admin_web_layout.dart';
+import 'admin_navigation.dart';
 import 'attendance_by_class_screen.dart';
 import 'widgets/admin_animated_card.dart';
 import 'widgets/admin_entrance.dart';
@@ -89,8 +91,16 @@ class _AttendanceManagementScreenState
         [Color(0xFFBA6CF5), Colors.white],
       ];
 
+      // Numeric-aware sort so "Semester 2" precedes "Semester 10"; colors are
+      // assigned after sorting so each semester keeps a stable color.
+      final sorted = List<Map<String, dynamic>>.from(summary)
+        ..sort((a, b) => compareSemesters(
+              a['semester']?.toString() ?? '',
+              b['semester']?.toString() ?? '',
+            ));
+
       setState(() {
-        _semesters = summary.asMap().entries.map((entry) {
+        _semesters = sorted.asMap().entries.map((entry) {
           final index = entry.key;
           final data = entry.value;
           final semesterStr = data['semester']?.toString() ?? '';
@@ -251,7 +261,7 @@ class _AttendanceManagementScreenState
               ),
               SizedBox(height: 4),
               Text(
-                'Browse every attendance session, grouped by date',
+                'Browse every attendance session, grouped by class',
                 style: TextStyle(
                   fontSize: 16,
                   color: _AppColors.textMuted,
@@ -265,7 +275,7 @@ class _AttendanceManagementScreenState
         IconButton(
           icon: const Icon(Icons.arrow_back_rounded,
               color: _AppColors.textPrimary),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => backToAdminDashboard(context),
           tooltip: 'Back',
         ),
       ],
@@ -279,7 +289,7 @@ class _AttendanceManagementScreenState
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded,
                 color: _AppColors.textPrimary),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => backToAdminDashboard(context),
           ),
         const Icon(Icons.analytics_rounded, color: _AppColors.tealDark, size: 32),
         const SizedBox(width: 12),
@@ -311,8 +321,8 @@ class _AttendanceManagementScreenState
         color: semester.color,
         gradient: semester.gradient,
         compact: isCompact,
-        onTap: () {
-          Navigator.push(
+        onTap: () async {
+          await Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => AttendanceByClassScreen(
@@ -321,6 +331,9 @@ class _AttendanceManagementScreenState
               ),
             ),
           );
+          // Sessions may have been added elsewhere while we were away;
+          // refresh the semester stats on return.
+          if (mounted) _loadSemesters();
         },
         trailing: Icon(
           isCompact
@@ -353,7 +366,10 @@ class _AttendanceManagementScreenState
         crossAxisCount: crossAxisCount,
         mainAxisSpacing: isCompact ? 14 : 42,
         crossAxisSpacing: isCompact ? 18 : 55,
-        childAspectRatio: isCompact ? 3.0 : 1.6,
+        // Compact cards get a fixed height (AdminAnimatedCard needs ~103px);
+        // a width-derived ratio overflows at 600-675px viewport widths.
+        childAspectRatio: 1.6,
+        mainAxisExtent: isCompact ? 116 : null,
       ),
       itemBuilder: (context, idx) => card(_semesters[idx]),
     );

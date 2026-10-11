@@ -47,6 +47,11 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
   final List<TextEditingController> _semesterControllers = [];
   String? _batchError;
 
+  /// True when any row was edited after the last server-side validation.
+  /// The primary button stays on "Re-validate" until the server confirms the
+  /// edited rows again, so unvalidated edits can never reach create.
+  bool _needsRevalidate = false;
+
   @override
   void dispose() {
     _passwordController.dispose();
@@ -330,7 +335,10 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
           ),
         ),
       ),
-      onChanged: (_) => setState(() => row.errors.remove(field)),
+      onChanged: (_) => setState(() {
+        row.errors.remove(field);
+        _needsRevalidate = true;
+      }),
     );
   }
 
@@ -344,7 +352,11 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
         primaryLabel = 'Upload & Validate';
         primaryEnabled = _hasFile && _passwordValid && !_busy;
       case _BulkPhase.review:
-        primaryLabel = _allValid ? 'Add $_validCount Students' : 'Re-validate';
+        // Edits since the last server validation force "Re-validate" so the
+        // create path is only reachable with freshly confirmed rows.
+        primaryLabel = (_allValid && !_needsRevalidate)
+            ? 'Add $_validCount Students'
+            : 'Re-validate';
         primaryEnabled = !_busy && (_allValid || _rows.isNotEmpty);
     }
 
@@ -388,7 +400,7 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
       case _BulkPhase.setup:
         await _uploadAndValidate();
       case _BulkPhase.review:
-        if (_allValid) {
+        if (_allValid && !_needsRevalidate) {
           await _createStudents();
         } else {
           await _revalidate();
@@ -477,10 +489,15 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
       _busy = false;
       _rows = List.of(result.rows);
       _rebuildRowControllers();
+      _needsRevalidate = false;
       final fileLevel = result.rows.isNotEmpty && result.rows.first.row == 0;
-      _batchError = fileLevel && result.rows.first.errors.isNotEmpty
-          ? result.rows.first.errors['name']
-          : null;
+      // `result.error` carries batch-level failures (weak password,
+      // unreadable file) that used to be dropped, leaving a failed
+      // validation indistinguishable from a passing one.
+      _batchError = result.error ??
+          (fileLevel && result.rows.first.errors.isNotEmpty
+              ? result.rows.first.errors['name']
+              : null);
       if (_batchError == null) {
         _phase = _BulkPhase.review;
       }
@@ -501,7 +518,18 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
       _busy = false;
       _rows = List.of(result.rows);
       _rebuildRowControllers();
+      _needsRevalidate = false;
     });
+    if (result.error != null) {
+      // Reported inline instead of as a banner: a banner replaces the table
+      // and would discard the corrections the admin already made.
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(result.error!),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   Future<void> _createStudents() async {
@@ -512,24 +540,31 @@ class _BulkStudentsTabState extends State<BulkStudentsTab> {
       defaultPassword: _passwordController.text.trim(),
     );
     if (!mounted) return;
-    final success = result['success'] == true;
-    Navigator.of(context).pop();
-    if (success) {
+    setState(() => _busy = false);
+
+    if (result['success'] != true) {
+      // Stay open: closing here threw away every inline correction the admin
+      // had just made (e.g. a 409 because an email was taken meanwhile).
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${result['created'] ?? 0} students added successfully'),
-          backgroundColor: DialogColors.tealDark,
-        ),
-      );
-      widget.onStudentCreated();
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(result['error'] ?? 'Failed to add students'),
+          content: Text(
+            result['error']?.toString() ?? 'Failed to add students',
+          ),
           backgroundColor: Colors.red,
         ),
       );
+      return;
     }
+
+    if (!mounted) return;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${result['created'] ?? 0} students added successfully'),
+        backgroundColor: DialogColors.tealDark,
+      ),
+    );
+    widget.onStudentCreated();
   }
 
   void _readControllersIntoRows() {

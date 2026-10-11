@@ -53,6 +53,18 @@ Widget _pageForRoute(String title) {
   }
 }
 
+/// Top-level admin navigation **replaces** the current screen.
+///
+/// Pushing would stack a fresh copy of every screen the admin visits (each
+/// with its own state, scroll position and data fetches), and the stack grew
+/// without bound as the sidebar was used. Drill-down screens (semester →
+/// classes → students) still use plain pushes so Back works there.
 Future<void> navigateToAdminScreen(BuildContext context, String title) {
-  return Navigator.push(context, _fadeRoute(_pageForRoute(title)));
+  return Navigator.pushReplacement(context, _fadeRoute(_pageForRoute(title)));
+}
+
+/// "Back" on a top-level admin screen. After [navigateToAdminScreen] there
+/// is nothing underneath to pop, so back means "go to the dashboard".
+Future<void> backToAdminDashboard(BuildContext context) {
+  return navigateToAdminScreen(context, 'Dashboard');
 }

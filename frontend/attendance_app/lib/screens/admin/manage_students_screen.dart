@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../services/class_service.dart';
+import '../../utils/semester_utils.dart';
 import '../../widgets/admin_web_layout.dart';
+import 'admin_navigation.dart';
 import 'semester_classes_screen.dart';
 import 'widgets/add_student_dialog.dart';
 import 'widgets/admin_animated_card.dart';
 import 'widgets/admin_entrance.dart';
+import 'widgets/admin_export_button.dart';
 import 'widgets/admin_header_actions.dart';
 
 abstract class _AppColors {
@@ -40,9 +43,16 @@ class ManageStudentsScreen extends StatefulWidget {
 class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
   bool _isLoading = false;
   String? _errorMessage;
+
+  /// Non-blocking warning when the secondary fetch (unassigned students)
+  /// fails but the semester summary rendered fine.
+  String? _warningMessage;
   final ClassService _classService = ClassService();
   List<_SemesterCard> _semesters = [];
-  int? _unreachableCount;
+
+  /// Every student who is not in any class: those with a semester but no
+  /// class, plus those no flow can reach (blank/missing profile semester).
+  int _unassignedCount = 0;
 
   @override
   void initState() {
@@ -51,65 +61,95 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
   }
 
   Future<void> _loadSemesters() async {
+    if (!mounted) return;
     setState(() {
       _isLoading = true;
       _errorMessage = null;
+      _warningMessage = null;
     });
 
+    // Primary fetch: the semester summary. A failure here is fatal.
+    final List<Map<String, dynamic>> summary;
     try {
-      final summary = await _classService.getAdminClassesSummary();
-      final unassignedData = await _classService.getAdminUnassignedStudents();
-      final unreachableCount =
-          (unassignedData['unreachable'] as List?)?.length ?? 0;
-
-      if (mounted) {
-        const colorPalette = [
-          Color(0xFFD34C53),
-          Color(0xFFE4B40B),
-          Color(0xFFA83FD9),
-          Color(0xFF4FBDD6),
-          Color(0xFF66BB6A),
-          Color(0xFF46CDD5),
-        ];
-
-        const gradientPalette = [
-          [Color(0xFFF2658B), Colors.white],
-          [Color(0xFFE4BD3C), Colors.white],
-          [Color(0xFFBA6CF5), Colors.white],
-          [Color(0xFF3AB0E6), Colors.white],
-          [Color(0xFF81C784), Colors.white],
-          [Color(0xFF5FD4D4), Colors.white],
-        ];
-
-        setState(() {
-          _semesters = summary.asMap().entries.map((entry) {
-            final index = entry.key;
-            final data = entry.value;
-            final semesterStr = data['semester']?.toString() ?? '';
-            return _SemesterCard(
-              semesterDisplay: _semesterDisplay(semesterStr),
-              semesterLabel: semesterStr,
-              studentCount:
-                  int.tryParse(data['total_students']?.toString() ?? '') ??
-                      int.tryParse(data['student_count']?.toString() ?? '') ??
-                      0,
-              color: colorPalette[index % colorPalette.length],
-              gradient: gradientPalette[index % gradientPalette.length],
-            );
-          }).toList();
-          _unreachableCount = unreachableCount;
-          _isLoading = false;
-        });
-      }
+      summary =
+          List<Map<String, dynamic>>.from(await _classService.getAdminClassesSummary());
     } catch (e) {
-      debugPrint('Error loading semesters: $e');
+      debugPrint('Error loading class summaries: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
           _errorMessage = 'Could not load class summaries. Please try again.';
         });
       }
+      return;
     }
+
+    // Secondary fetch: unassigned-student counts (the amber banner). A
+    // failure here degrades to semester cards without the banner.
+    int unassignedTotal = 0;
+    try {
+      final unassignedData =
+          await _classService.getAdminUnassignedStudents();
+      final unreachable =
+          (unassignedData['unreachable'] as List?)?.length ?? 0;
+      final unenrolled = (unassignedData['students'] as List?)?.length ?? 0;
+      unassignedTotal = unreachable + unenrolled;
+    } catch (e) {
+      debugPrint('Error loading unassigned students: $e');
+      if (mounted) {
+        _warningMessage =
+            'Could not load the unassigned-students count. Students not yet '
+            'in a class may not be shown here.';
+      }
+    }
+
+    if (!mounted) return;
+
+    const colorPalette = [
+      Color(0xFFD34C53),
+      Color(0xFFE4B40B),
+      Color(0xFFA83FD9),
+      Color(0xFF4FBDD6),
+      Color(0xFF66BB6A),
+      Color(0xFF46CDD5),
+    ];
+
+    const gradientPalette = [
+      [Color(0xFFF2658B), Colors.white],
+      [Color(0xFFE4BD3C), Colors.white],
+      [Color(0xFFBA6CF5), Colors.white],
+      [Color(0xFF3AB0E6), Colors.white],
+      [Color(0xFF81C784), Colors.white],
+      [Color(0xFF5FD4D4), Colors.white],
+    ];
+
+    // Numeric-aware sort so "Semester 2" precedes "Semester 10"; colors are
+    // assigned after sorting so each semester keeps a stable color.
+    final sorted = List<Map<String, dynamic>>.from(summary)
+      ..sort((a, b) => compareSemesters(
+            a['semester']?.toString() ?? '',
+            b['semester']?.toString() ?? '',
+          ));
+
+    setState(() {
+      _semesters = sorted.asMap().entries.map((entry) {
+        final index = entry.key;
+        final data = entry.value;
+        final semesterStr = data['semester']?.toString() ?? '';
+        return _SemesterCard(
+          semesterDisplay: _semesterDisplay(semesterStr),
+          semesterLabel: semesterStr,
+          studentCount:
+              int.tryParse(data['total_students']?.toString() ?? '') ??
+                  int.tryParse(data['student_count']?.toString() ?? '') ??
+                  0,
+          color: colorPalette[index % colorPalette.length],
+          gradient: gradientPalette[index % gradientPalette.length],
+        );
+      }).toList();
+      _unassignedCount = unassignedTotal;
+      _isLoading = false;
+    });
   }
 
   String _semesterDisplay(String raw) {
@@ -186,9 +226,13 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
   }
 
   Widget _buildStudentsContent(int crossAxisCount, bool isMobile) {
-    final unassigned = _unreachableCount ?? 0;
+    final unassigned = _unassignedCount;
     return Column(
       children: [
+        if (_warningMessage != null) ...[
+          _buildWarningBanner(),
+          const SizedBox(height: 16),
+        ],
         if (unassigned > 0) ...[
           _buildUnassignedCard(unassigned),
           const SizedBox(height: 24),
@@ -198,6 +242,37 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         else
           _buildSemesterGrid(crossAxisCount, isMobile),
       ],
+    );
+  }
+
+  Widget _buildWarningBanner() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF59E0B).withOpacity(0.12),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded,
+              color: Color(0xFFF59E0B), size: 18),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _warningMessage!,
+              style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16, color: Color(0xFF92400E)),
+            onPressed: () => setState(() => _warningMessage = null),
+            tooltip: 'Dismiss',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+          ),
+        ],
+      ),
     );
   }
 
@@ -247,7 +322,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          '$count student${count == 1 ? '' : 's'} without a semester \u2014 tap to review',
+                          '$count student${count == 1 ? '' : 's'} not in any class \u2014 tap to review',
                           style: const TextStyle(
                             fontSize: 13,
                             color: _AppColors.textMuted,
@@ -271,7 +346,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
   }
 
   Future<void> _openUnassigned() async {
-    final count = _unreachableCount ?? 0;
+    final count = _unassignedCount;
     await Navigator.push(
       context,
       MaterialPageRoute(
@@ -365,10 +440,11 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
           ),
         ),
         const SizedBox(width: 16),
+        const AdminExportButton(dataset: 'students'),
         AdminHeaderActions(onRefresh: _loadSemesters, showLogout: false),
         IconButton(
           icon: const Icon(Icons.arrow_back_rounded, color: _AppColors.textPrimary),
-          onPressed: () => Navigator.pop(context),
+          onPressed: () => backToAdminDashboard(context),
           tooltip: 'Back',
         ),
       ],
@@ -381,7 +457,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         if (isMobile)
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded, color: _AppColors.textPrimary),
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => backToAdminDashboard(context),
           ),
         const Icon(Icons.people_alt_rounded, color: _AppColors.tealDark, size: 32),
         const SizedBox(width: 12),
@@ -400,7 +476,7 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
           onPressed: _showAddStudentDialog,
           tooltip: 'Add Student',
         ),
-        const SizedBox(width: 8),
+        const AdminExportButton(dataset: 'students'),
         AdminHeaderActions(onRefresh: _loadSemesters, showLogout: false),
       ],
     );
@@ -449,7 +525,10 @@ class _ManageStudentsScreenState extends State<ManageStudentsScreen> {
         crossAxisCount: crossAxisCount,
         mainAxisSpacing: isCompact ? 14 : 42,
         crossAxisSpacing: isCompact ? 18 : 55,
-        childAspectRatio: isCompact ? 3.0 : 1.6,
+        // Compact cards get a fixed height (AdminAnimatedCard needs ~103px);
+        // a width-derived ratio overflows at 600-675px viewport widths.
+        childAspectRatio: 1.6,
+        mainAxisExtent: isCompact ? 116 : null,
       ),
       itemBuilder: (context, idx) => card(_semesters[idx]),
     );

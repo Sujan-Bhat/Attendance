@@ -13,6 +13,8 @@ class AdminWebLayout extends StatefulWidget {
   final Widget desktopBody;
   final String currentRoute;
   final bool showMobileAppBar;
+  final Widget? mobileTitle;
+  final List<Widget>? mobileActions;
 
   const AdminWebLayout({
     super.key,
@@ -20,6 +22,8 @@ class AdminWebLayout extends StatefulWidget {
     required this.desktopBody,
     required this.currentRoute,
     this.showMobileAppBar = true,
+    this.mobileTitle,
+    this.mobileActions,
   });
 
   @override
@@ -29,7 +33,33 @@ class AdminWebLayout extends StatefulWidget {
 class _AdminWebLayoutState extends State<AdminWebLayout> {
   final AuthService _authService = AuthService();
 
-  static bool _isSidebarExpanded = false;
+  /// Expanding/collapsing is per-screen (non-static) so the choice does not
+  /// leak across screens or between login sessions.
+  bool _isSidebarExpanded = false;
+
+  String _userName = 'Admin';
+  String _username = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadUserName();
+  }
+
+  Future<void> _loadUserName() async {
+    try {
+      final user = await _authService.getCurrentUser();
+      if (!mounted || user == null) return;
+      final first = (user['first_name'] ?? '').toString().trim();
+      final username = (user['username'] ?? '').toString().trim();
+      setState(() {
+        _userName = first.isNotEmpty
+            ? first
+            : (username.isNotEmpty ? username : 'Admin');
+        _username = username;
+      });
+    } catch (_) {}
+  }
 
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
@@ -60,58 +90,58 @@ class _AdminWebLayoutState extends State<AdminWebLayout> {
     final isSelected = widget.currentRoute == title;
     final showLabel = _isSidebarExpanded;
 
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
-      child: Tooltip(
-        message: showLabel ? '' : title,
-        child: AnimatedContainer(
-          duration: const Duration(milliseconds: 300),
-          curve: Curves.easeInOut,
-          decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => title == 'Logout' ? _logout() : _handleCardTap(title),
-              child: Container(
-                height: 48,
-                child: Row(
-                  children: [
-                    SizedBox(
-                      width: 56,
-                      child: Icon(
-                        icon,
-                        color: isSelected ? _AppColors.tealDark : Colors.white70,
-                        size: 24,
-                      ),
-                    ),
-                    if (showLabel) ...[
-                      Expanded(
-                        child: Text(
-                          title,
-                          style: TextStyle(
-                            color: isSelected
-                                ? _AppColors.tealDark
-                                : Colors.white70,
-                            fontSize: 14,
-                            fontWeight: isSelected
-                                ? FontWeight.bold
-                                : FontWeight.normal,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                    ],
-                  ],
+    final Widget item = AnimatedContainer(
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeInOut,
+      decoration: BoxDecoration(
+        color: isSelected ? Colors.white : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => title == 'Logout' ? _logout() : _handleCardTap(title),
+          child: Container(
+            height: 48,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 56,
+                  child: Icon(
+                    icon,
+                    color: isSelected ? _AppColors.tealDark : Colors.white70,
+                    size: 24,
+                  ),
                 ),
-              ),
+                if (showLabel) ...[
+                  Expanded(
+                    child: Text(
+                      title,
+                      style: TextStyle(
+                        color: isSelected
+                            ? _AppColors.tealDark
+                            : Colors.white70,
+                        fontSize: 14,
+                        fontWeight:
+                            isSelected ? FontWeight.bold : FontWeight.normal,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
         ),
       ),
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+      // Only collapsed rows need a tooltip: an empty message still renders
+      // an empty bubble beside every labelled row.
+      child: showLabel ? item : Tooltip(message: title, child: item),
     );
   }
 
@@ -123,11 +153,17 @@ class _AdminWebLayoutState extends State<AdminWebLayout> {
   Widget _buildMobileDrawer() {
     return Drawer(
       child: Container(
-        decoration: const BoxDecoration(color: _AppColors.darkBg),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF1E1E2C), Color(0xFF2D2D44)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
         child: ListView(
           children: [
-            const DrawerHeader(
-              decoration: BoxDecoration(
+            DrawerHeader(
+              decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   colors: [_AppColors.tealDark, Color(0xFF0097A7)],
                 ),
@@ -136,7 +172,7 @@ class _AdminWebLayoutState extends State<AdminWebLayout> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
-                  CircleAvatar(
+                  const CircleAvatar(
                     radius: 30,
                     backgroundColor: Colors.white,
                     child: Icon(
@@ -145,15 +181,25 @@ class _AdminWebLayoutState extends State<AdminWebLayout> {
                       color: _AppColors.tealDark,
                     ),
                   ),
-                  SizedBox(height: 10),
+                  const SizedBox(height: 10),
                   Text(
-                    'Admin Panel',
-                    style: TextStyle(
+                    _userName,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                     ),
+                    overflow: TextOverflow.ellipsis,
                   ),
+                  if (_username.isNotEmpty)
+                    Text(
+                      '@$_username',
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        fontSize: 14,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                 ],
               ),
             ),
@@ -163,10 +209,14 @@ class _AdminWebLayoutState extends State<AdminWebLayout> {
                 leading: Icon(item.icon, color: Colors.white70, size: 22),
                 title: Text(
                   item.title,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  style: TextStyle(
+                    color: isActive ? Colors.white : Colors.white70,
+                    fontSize: 14,
+                    fontWeight: isActive ? FontWeight.bold : FontWeight.normal,
+                  ),
                 ),
                 selected: isActive,
-                selectedTileColor: Colors.white24,
+                selectedTileColor: Colors.white.withOpacity(0.1),
                 onTap: () async {
                   Navigator.pop(context);
                   if (isActive) return;
@@ -280,6 +330,8 @@ class _AdminWebLayoutState extends State<AdminWebLayout> {
                   onPressed: () => Scaffold.of(ctx).openDrawer(),
                 ),
               ),
+              title: widget.mobileTitle,
+              actions: widget.mobileActions,
             )
           : null,
       drawer: _buildMobileDrawer(),

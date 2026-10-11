@@ -73,6 +73,7 @@ from attendance.admin_views import (
     admin_delete_all_students,
     admin_attendance_semesters,
     admin_attendance_by_semester,
+    admin_export,
 )
 
 FLUTTER_WEB_DIR = os.path.join(settings.BASE_DIR, 'flutter_web')
@@ -178,6 +179,7 @@ urlpatterns = [
     # Admin attendance management
     path('api/v1/admin/attendance/semesters/', admin_attendance_semesters, name='admin_attendance_semesters'),
     path('api/v1/admin/attendance/by-semester/<str:semester>/', admin_attendance_by_semester, name='admin_attendance_by_semester'),
+    path('api/v1/admin/export/<str:dataset>/<str:file_format>/', admin_export, name='admin_export'),
 
     # Flutter Web — must be last
     re_path(r'^(?P<path>.*)$', serve_flutter, name='flutter_web'),
