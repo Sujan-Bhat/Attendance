@@ -2,7 +2,9 @@
     <!--  ADD Camera Permission -->
     <uses-feature android:name="android.hardware.camera" />
     <uses-feature android:name="android.hardware.camera.autofocus" />
+    <uses-feature android:name="android.hardware.camera.flash" android:required="false" />
     <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FLASHLIGHT" />
     <uses-permission android:name="android.permission.INTERNET"/>
     
     <!-- BLE Permissions -->
@@ -58,6 +60,9 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <meta-data
+            android:name="com.google.mlkit.vision.DEPENDENCIES"
+            android:value="barcode" />
         <!-- FileProvider for camera capture -->
         <provider
             android:name="androidx.core.content.FileProvider"

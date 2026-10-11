@@ -1,16 +1,18 @@
+import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
-import 'package:shared_preferences/shared_preferences.dart';
-import '../../widgets/student_drawer.dart';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:camera/camera.dart';
-import 'package:mobile_scanner/mobile_scanner.dart';
+import 'package:google_mlkit_barcode_scanning/google_mlkit_barcode_scanning.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+
 import '../../services/attendance_service.dart';
 import '../../services/session_service.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/offline_indicator.dart';
+import '../../widgets/student_drawer.dart';
 import '../../services/ble_mesh_service.dart';
 
 class QRScannerScreen extends StatefulWidget {
@@ -25,43 +27,52 @@ class _QRScannerScreenState extends State<QRScannerScreen>
   final AttendanceService _attendanceService = AttendanceService();
   final SessionService _sessionService = SessionService();
 
-  // Scanner for QR mode
-  MobileScannerController? _scannerController;
-  bool _isScannerInitializing = false;
+  // Unified camera controller for both QR and Pattern modes
+  CameraController? _cameraController;
+  CameraDescription? _cameraDescription;
+  bool _isCameraInitializing = false;
+  bool _cameraPermissionGranted = false;
   bool _isTorchOn = false;
 
-  // Camera for Pattern mode capture
-  CameraController? _cameraController;
+  // ML Kit barcode scanner
+  late final BarcodeScanner _barcodeScanner;
+  bool _isDetecting = false;
 
+  // Mode and flow state
+  bool isPatternMode = false;
+  bool _isSwitchingMode = false;
   bool isProcessing = false;
   bool hasScanned = false;
   String? scannedData;
-  bool isPatternMode = false;
-  bool _cameraPermissionGranted = false;
 
-  bool _isCameraInitializing = false;
-  bool _isSwitchingMode = false;
-
-  // Zoom control variables for both modes
+  // Zoom control variables for unified controller
   double _baseZoomLevel = 1.0;
   double _currentZoomLevel = 1.0;
-
-  // Camera package zoom bounds
   double _minAvailableZoom = 1.0;
   double _maxAvailableZoom = 1.0;
+
+  static const Map<DeviceOrientation, int> _orientations = {
+    DeviceOrientation.portraitUp: 0,
+    DeviceOrientation.landscapeLeft: 90,
+    DeviceOrientation.portraitDown: 180,
+    DeviceOrientation.landscapeRight: 270,
+  };
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
-    _initializeQRScanner();
+    _barcodeScanner = BarcodeScanner(formats: [BarcodeFormat.qrCode]);
+    _initializeCamera();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _scannerController?.dispose();
+    _stopImageStreamSafely();
+    _barcodeScanner.close();
     _cameraController?.dispose();
+    _cameraController = null;
     super.dispose();
   }
 
@@ -69,31 +80,36 @@ class _QRScannerScreenState extends State<QRScannerScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     super.didChangeAppLifecycleState(state);
 
+    // AppLifecycleState.inactive is a strict NO-OP:
+    // Pulling down Android notification shade or status bar must not freeze or tear down camera hardware.
+    if (state == AppLifecycleState.inactive) {
+      return;
+    }
+
     if (state == AppLifecycleState.resumed) {
-      if (!isPatternMode) {
-        if (_scannerController == null || _scannerController!.value.error != null) {
-          _initializeQRScanner();
-        } else {
-          _scannerController?.start();
-        }
+      if (_cameraController == null || !_cameraController!.value.isInitialized) {
+        _initializeCamera();
       } else {
-        _initializePatternCamera();
+        _enforceTorch(_cameraController!);
+        if (!isPatternMode && !isProcessing && !hasScanned) {
+          _startImageStreamSafely();
+        }
       }
-    } else {
-      if (!isPatternMode) {
-        _scannerController?.stop();
-      } else if (_cameraController != null) {
-        _cameraController!.dispose();
-        _cameraController = null;
-      }
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached) {
+      // App is backgrounded: stop image stream and release camera hardware session cleanly
+      _stopImageStreamSafely();
+      _cameraController?.dispose();
+      _cameraController = null;
     }
   }
 
-  Future<void> _initializeQRScanner() async {
-    if (_isScannerInitializing || isPatternMode) return;
+  Future<void> _initializeCamera() async {
+    if (_isCameraInitializing) return;
 
     setState(() {
-      _isScannerInitializing = true;
+      _isCameraInitializing = true;
     });
 
     try {
@@ -103,7 +119,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       if (!status.isGranted) {
         setState(() {
           _cameraPermissionGranted = false;
-          _isScannerInitializing = false;
+          _isCameraInitializing = false;
         });
         _showPermissionDialog();
         return;
@@ -113,169 +129,102 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         _cameraPermissionGranted = true;
       });
 
-      // Wait 350ms to ensure previous camera hardware session is fully released by Android HAL
-      await Future.delayed(const Duration(milliseconds: 350));
-      if (!mounted || isPatternMode) return;
-
-      if (_scannerController != null) {
-        try {
-          await _scannerController!.stop();
-          await _scannerController!.dispose();
-        } catch (_) {}
-        _scannerController = null;
-      }
-
-      final controller = MobileScannerController(
-        autoStart: false,
-        torchEnabled: false,
-      );
-
-      if (!mounted || isPatternMode) {
-        controller.dispose();
+      final cameras = await availableCameras();
+      if (cameras.isEmpty) {
+        debugPrint('No cameras found on device');
         return;
       }
-
-      _scannerController = controller;
-      if (mounted) setState(() {});
-
-      // Retry starting up to 3 times in case camera HAL is momentarily busy
-      bool started = false;
-      for (int attempt = 0; attempt < 3; attempt++) {
-        if (!mounted || isPatternMode || _scannerController != controller) break;
-        try {
-          await controller.start();
-          started = true;
-          break;
-        } catch (e) {
-          debugPrint('MobileScanner start attempt ${attempt + 1} failed: $e');
-          await Future.delayed(const Duration(milliseconds: 400));
-        }
-      }
-
-      if (started && mounted && _scannerController == controller) {
-        setState(() {});
-        _enforceScannerTorch();
-      }
-    } catch (e) {
-      debugPrint('Error initializing QR scanner: $e');
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isScannerInitializing = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _enforceScannerTorch() async {
-    for (int i = 0; i < 5; i++) {
-      if (!mounted || isPatternMode || _scannerController == null) return;
-      if (_scannerController!.value.isRunning) {
-        try {
-          if (_scannerController!.value.torchState != TorchState.on) {
-            await _scannerController!.toggleTorch();
-          }
-          if (mounted) {
-            setState(() {
-              _isTorchOn = true;
-            });
-          }
-          return;
-        } catch (e) {
-          debugPrint('QR scanner torch attempt ${i + 1} failed: $e');
-          await Future.delayed(const Duration(milliseconds: 400));
-        }
-      } else {
-        await Future.delayed(const Duration(milliseconds: 400));
-      }
-    }
-  }
-
-  void _showPermissionDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Camera Permission Required'),
-        content: const Text(
-          'This app needs camera access to scan QR codes for attendance. Please grant camera permission in app settings.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.pop(context);
-              openAppSettings();
-            },
-            child: const Text('Open Settings'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _initializePatternCamera() async {
-    if (_isCameraInitializing) return;
-
-    setState(() {
-      _isCameraInitializing = true;
-    });
-
-    try {
-      final cameras = await availableCameras();
-      if (cameras.isEmpty) return;
 
       final backCamera = cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.back,
         orElse: () => cameras.first,
       );
+      _cameraDescription = backCamera;
 
-      // Using veryHigh (1080p) instead of max. 'max' pushes 4K/50MP raw frames into
-      // Flutter's rendering engine, which absolutely destroys the framerate and aspect ratio!
-      _cameraController = CameraController(
+      final controller = CameraController(
         backCamera,
         ResolutionPreset.veryHigh,
         enableAudio: false,
+        imageFormatGroup: Platform.isAndroid
+            ? ImageFormatGroup.nv21
+            : ImageFormatGroup.bgra8888,
       );
 
-      await _cameraController!.initialize();
+      _cameraController = controller;
+      await controller.initialize();
+      if (!mounted || _cameraController != controller) {
+        controller.dispose();
+        return;
+      }
 
-      // Get zoom limits
-      _minAvailableZoom = await _cameraController!.getMinZoomLevel();
-      _maxAvailableZoom = await _cameraController!.getMaxZoomLevel();
-      _currentZoomLevel = _minAvailableZoom;
+      // Query zoom limits
+      try {
+        _minAvailableZoom = await controller.getMinZoomLevel();
+        _maxAvailableZoom = await controller.getMaxZoomLevel();
+        _currentZoomLevel = _minAvailableZoom;
+      } catch (e) {
+        debugPrint('Error querying zoom levels: $e');
+      }
+
+      // Enforce torch on immediately upon initialization with a 5-attempt retry loop
+      await _enforceTorch(controller);
+
+      // In QR mode, start streaming frames to ML Kit immediately
+      if (!isPatternMode && !isProcessing && !hasScanned && mounted) {
+        await _startImageStreamSafely();
+      }
     } catch (e) {
-      debugPrint('Error initializing camera for pattern capture: $e');
+      debugPrint('Error initializing camera: $e');
     } finally {
       if (mounted) {
         setState(() {
           _isCameraInitializing = false;
         });
-
-        // Force flash ON using a robust retry loop
-        if (_cameraController != null &&
-            _cameraController!.value.isInitialized) {
-          _enforceTorch(_cameraController!);
-        }
       }
     }
   }
 
   Future<void> _enforceTorch(CameraController controller) async {
-    // Retry up to 5 times (2.5 seconds total) because Android camera
-    // hardware takes progressively longer to wake up after rapid toggles
+    // Retry up to 5 times (300ms backoff) to accommodate Android HAL settling delays
     for (int i = 0; i < 5; i++) {
-      if (!mounted || !isPatternMode || _cameraController == null) return;
+      if (!mounted || _cameraController != controller) return;
       try {
         await controller.setFlashMode(FlashMode.torch);
+        if (mounted) {
+          setState(() {
+            _isTorchOn = true;
+          });
+        }
         debugPrint('Flash torch enforced successfully on attempt ${i + 1}');
         return;
       } catch (e) {
         debugPrint('Flash torch enforcement failed on attempt ${i + 1}: $e');
-        await Future.delayed(const Duration(milliseconds: 500));
+        if (i < 4) {
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
       }
+    }
+  }
+
+  Future<void> _startImageStreamSafely() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (_cameraController!.value.isStreamingImages) return;
+
+    try {
+      await _cameraController!.startImageStream(_processCameraImage);
+    } catch (e) {
+      debugPrint('Failed to start image stream: $e');
+    }
+  }
+
+  Future<void> _stopImageStreamSafely() async {
+    if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+    if (!_cameraController!.value.isStreamingImages) return;
+
+    try {
+      await _cameraController!.stopImageStream();
+    } catch (e) {
+      debugPrint('Failed to stop image stream: $e');
     }
   }
 
@@ -289,27 +238,34 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
     try {
       if (isPatternMode) {
-        // Switch to Pattern Mode: Cleanly tear down QR scanner first
-        if (_scannerController != null) {
-          try {
-            await _scannerController!.stop();
-            await _scannerController!.dispose();
-          } catch (_) {}
-          _scannerController = null;
+        // Switching to Pattern Mode:
+        // Do NOT dispose camera. Simply stop the image stream while keeping the preview live and torch on.
+        await _stopImageStreamSafely();
+        if (_cameraController != null && _cameraController!.value.isInitialized) {
+          if (_cameraController!.value.isPreviewPaused) {
+            await _cameraController!.resumePreview();
+          }
+          if (_isTorchOn) {
+            await _enforceTorch(_cameraController!);
+          }
         }
-        await Future.delayed(const Duration(milliseconds: 300));
-        await _initializePatternCamera();
       } else {
-        // Switch to QR Mode: Cleanly tear down Pattern camera first
-        if (_cameraController != null) {
-          try {
-            await _cameraController!.dispose();
-          } catch (_) {}
-          _cameraController = null;
+        // Switching to QR Mode:
+        // Keep camera live, resume preview if paused, and start the image stream.
+        if (_cameraController != null && _cameraController!.value.isInitialized) {
+          if (_cameraController!.value.isPreviewPaused) {
+            await _cameraController!.resumePreview();
+          }
+          if (_isTorchOn) {
+            await _enforceTorch(_cameraController!);
+          }
+          if (!isProcessing && !hasScanned) {
+            await _startImageStreamSafely();
+          }
         }
-        await Future.delayed(const Duration(milliseconds: 300));
-        await _initializeQRScanner();
       }
+    } catch (e) {
+      debugPrint('Error toggling mode: $e');
     } finally {
       if (mounted) {
         setState(() {
@@ -324,19 +280,133 @@ class _QRScannerScreenState extends State<QRScannerScreen>
   }
 
   void _handleScaleUpdate(ScaleUpdateDetails details) async {
-    if (isPatternMode && _cameraController != null) {
-      // Handle camera package zoom
+    if (_cameraController != null && _cameraController!.value.isInitialized) {
       _currentZoomLevel = (_baseZoomLevel * details.scale).clamp(
         _minAvailableZoom,
         _maxAvailableZoom,
       );
-      await _cameraController!.setZoomLevel(_currentZoomLevel);
-    } else if (!isPatternMode && _scannerController != null) {
-      // Handle mobile_scanner zoom (0.0 to 1.0 ratio typically in newer versions)
-      _currentZoomLevel = (_baseZoomLevel * details.scale).clamp(1.0, 5.0);
-      final zoomRatio = ((_currentZoomLevel - 1.0) / 4.0).clamp(0.0, 1.0);
-      _scannerController?.setZoomScale(zoomRatio);
+      try {
+        await _cameraController!.setZoomLevel(_currentZoomLevel);
+      } catch (e) {
+        debugPrint('Error setting zoom level: $e');
+      }
     }
+  }
+
+  InputImageRotation? _getImageRotation() {
+    if (_cameraDescription == null) return null;
+    final sensorOrientation = _cameraDescription!.sensorOrientation;
+
+    if (Platform.isIOS) {
+      return InputImageRotationValue.fromRawValue(sensorOrientation);
+    } else if (Platform.isAndroid) {
+      final deviceOrientation = _cameraController?.value.deviceOrientation;
+      final rotationCompensation = _orientations[deviceOrientation];
+      if (rotationCompensation == null) {
+        return InputImageRotationValue.fromRawValue(sensorOrientation) ??
+            InputImageRotation.rotation90deg;
+      }
+
+      int rotationDegrees;
+      if (_cameraDescription!.lensDirection == CameraLensDirection.front) {
+        rotationDegrees = (sensorOrientation + rotationCompensation) % 360;
+      } else {
+        rotationDegrees = (sensorOrientation - rotationCompensation + 360) % 360;
+      }
+      return InputImageRotationValue.fromRawValue(rotationDegrees) ??
+          InputImageRotation.rotation90deg;
+    }
+    return null;
+  }
+
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    if (image.planes.isEmpty) return null;
+    final rotation = _getImageRotation();
+    if (rotation == null) return null;
+
+    InputImageFormat? format;
+    if (Platform.isAndroid) {
+      format = InputImageFormatValue.fromRawValue(image.format.raw) ??
+          InputImageFormat.nv21;
+    } else if (Platform.isIOS) {
+      format = InputImageFormatValue.fromRawValue(image.format.raw) ??
+          InputImageFormat.bgra8888;
+    }
+    if (format == null) return null;
+
+    Uint8List bytes;
+    if (image.planes.length == 1) {
+      bytes = image.planes.first.bytes;
+    } else {
+      final int totalLength = image.planes.fold<int>(
+        0,
+        (int sum, Plane plane) => sum + plane.bytes.length,
+      );
+      final Uint8List concatenated = Uint8List(totalLength);
+      int offset = 0;
+      for (final Plane plane in image.planes) {
+        concatenated.setRange(offset, offset + plane.bytes.length, plane.bytes);
+        offset += plane.bytes.length;
+      }
+      bytes = concatenated;
+    }
+
+    return InputImage.fromBytes(
+      bytes: bytes,
+      metadata: InputImageMetadata(
+        size: Size(image.width.toDouble(), image.height.toDouble()),
+        rotation: rotation,
+        format: format,
+        bytesPerRow: image.planes.first.bytesPerRow,
+      ),
+    );
+  }
+
+  Future<void> _processCameraImage(CameraImage image) async {
+    // Drop frame immediately if:
+    // 1. Concurrency mutex locked (_isDetecting)
+    // 2. Attendance network/BLE validation is running (isProcessing)
+    // 3. A code has already been recognized and handled (hasScanned)
+    // 4. User switched to Pattern Scan mode (isPatternMode)
+    if (_isDetecting || isProcessing || hasScanned || isPatternMode) {
+      return;
+    }
+
+    _isDetecting = true;
+    try {
+      final inputImage = _inputImageFromCameraImage(image);
+      if (inputImage == null) return;
+
+      final List<Barcode> barcodes =
+          await _barcodeScanner.processImage(inputImage);
+
+      if (barcodes.isNotEmpty &&
+          !hasScanned &&
+          !isProcessing &&
+          !isPatternMode &&
+          mounted) {
+        for (final barcode in barcodes) {
+          final rawValue = barcode.rawValue;
+          if (rawValue != null && rawValue.isNotEmpty) {
+            _handleQRCode(rawValue);
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('ML Kit barcode detection error: $e');
+    } finally {
+      _isDetecting = false;
+    }
+  }
+
+  void _resumeQRScanningAfterDelay({int seconds = 3}) {
+    Future.delayed(Duration(seconds: seconds), () async {
+      if (mounted && !hasScanned && !isPatternMode) {
+        setState(() => isProcessing = false);
+        await _startImageStreamSafely();
+      }
+    });
   }
 
   Future<void> _handleQRCode(String qrData) async {
@@ -347,14 +417,15 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       scannedData = qrData;
     });
 
+    // Suspend image stream while handling verification
+    await _stopImageStreamSafely();
+
     try {
       final dynamic decoded = jsonDecode(qrData);
 
       if (decoded is! Map<String, dynamic>) {
         _showError('Invalid QR code format. Not an attendance code.');
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) setState(() => isProcessing = false);
-        });
+        _resumeQRScanningAfterDelay();
         return;
       }
 
@@ -363,9 +434,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (sessionId == null) {
         _showError('Invalid QR code');
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) setState(() => isProcessing = false);
-        });
+        _resumeQRScanningAfterDelay();
         return;
       }
 
@@ -394,17 +463,19 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         bleHopCount = bleResult['hop_count'];
         bleRssi = bleResult['rssi'];
         // pop the verifying dialog
-        Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
       } catch (e) {
-        print("BLE mesh verification failed: $e");
+        debugPrint("BLE mesh verification failed: $e");
         // Pop the verifying dialog
-        Navigator.of(context, rootNavigator: true).pop();
-        _showError(
-          'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
-        );
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) setState(() => isProcessing = false);
-        });
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+          _showError(
+            'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
+          );
+        }
+        _resumeQRScanningAfterDelay();
         return;
       }
 
@@ -412,8 +483,6 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (token != null) {
         if (mounted) {
-
-
           if (isOffline) {
             final timestamp = DateTime.now().toUtc().toIso8601String();
             await SyncService().enqueueQRScan(
@@ -446,9 +515,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               _showSuccessDialog(result['message']);
             } else {
               _showError(result['message']);
-              Future.delayed(const Duration(seconds: 3), () {
-                if (mounted) setState(() => isProcessing = false);
-              });
+              _resumeQRScanningAfterDelay();
             }
           }
         }
@@ -461,13 +528,15 @@ class _QRScannerScreenState extends State<QRScannerScreen>
             bleHopCount: bleHopCount,
             bleRssi: bleRssi,
           );
-          setState(() {
-            hasScanned = true;
-            isProcessing = false;
-          });
-          _showSuccessDialog(
-            'Offline Mode: QR scan saved locally. It will sync automatically when internet is restored.',
-          );
+          if (mounted) {
+            setState(() {
+              hasScanned = true;
+              isProcessing = false;
+            });
+            _showSuccessDialog(
+              'Offline Mode: QR scan saved locally. It will sync automatically when internet is restored.',
+            );
+          }
           return;
         }
 
@@ -483,18 +552,14 @@ class _QRScannerScreenState extends State<QRScannerScreen>
             _showSuccessDialog(result['message']);
           } else {
             _showError(result['message']);
-            Future.delayed(const Duration(seconds: 3), () {
-              if (mounted) setState(() => isProcessing = false);
-            });
+            _resumeQRScanningAfterDelay();
           }
         }
       }
     } catch (e) {
       if (mounted) {
         _showError('Invalid QR code format: $e');
-        Future.delayed(const Duration(seconds: 3), () {
-          if (mounted) setState(() => isProcessing = false);
-        });
+        _resumeQRScanningAfterDelay();
       }
     }
   }
@@ -502,20 +567,25 @@ class _QRScannerScreenState extends State<QRScannerScreen>
   Future<void> _handlePatternCapture() async {
     if (isProcessing ||
         _cameraController == null ||
-        !_cameraController!.value.isInitialized)
+        !_cameraController!.value.isInitialized) {
       return;
+    }
     setState(() => isProcessing = true);
 
     try {
-      // Force flash on before taking the picture
+      // 1. Ensure any stream is stopped before capture
+      await _stopImageStreamSafely();
+
+      // 2. Force flash on before taking the picture
       try {
         await _cameraController!.setFlashMode(FlashMode.torch);
       } catch (_) {}
 
+      // 3. Take photo
       final XFile picture = await _cameraController!.takePicture();
       final String imagePath = picture.path;
 
-      // Pause preview immediately so the user knows photo was taken
+      // 4. Pause preview immediately so the user knows photo was taken
       await _cameraController!.pausePreview();
 
       List<ConnectivityResult> connectivityResults = [];
@@ -542,9 +612,15 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               errorStr.contains('connection error')) {
             isOffline = true;
           } else {
-            _showError('Network/API Error: $e');
-            setState(() => isProcessing = false);
-            await _cameraController!.resumePreview();
+            if (mounted) {
+              _showError('Network/API Error: $e');
+              setState(() => isProcessing = false);
+            }
+            if (_cameraController != null &&
+                _cameraController!.value.isInitialized) {
+              await _cameraController!.resumePreview();
+              await _enforceTorch(_cameraController!);
+            }
             return;
           }
         }
@@ -561,13 +637,21 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
             // Check if teacher has uploaded the reference image yet
             if (session['has_reference_image'] == false) {
-              _showError(
-                'Teacher has not uploaded the board photo yet. Please wait and try again.',
-              );
-              Future.delayed(const Duration(seconds: 3), () {
-                if (mounted) setState(() => isProcessing = false);
+              if (mounted) {
+                _showError(
+                  'Teacher has not uploaded the board photo yet. Please wait and try again.',
+                );
+              }
+              Future.delayed(const Duration(seconds: 3), () async {
+                if (mounted) {
+                  setState(() => isProcessing = false);
+                  if (_cameraController != null &&
+                      _cameraController!.value.isInitialized) {
+                    await _cameraController!.resumePreview();
+                    await _enforceTorch(_cameraController!);
+                  }
+                }
               });
-              await _cameraController!.resumePreview();
               return;
             }
 
@@ -596,15 +680,23 @@ class _QRScannerScreenState extends State<QRScannerScreen>
           bleHopCount = bleResult['hop_count'];
           bleRssi = bleResult['rssi'];
         }
-        Navigator.of(context, rootNavigator: true).pop();
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+        }
       } catch (e) {
-        print("BLE mesh verification failed for pattern: $e");
-        Navigator.of(context, rootNavigator: true).pop();
-        _showError(
-          'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
-        );
-        setState(() => isProcessing = false);
-        await _cameraController!.resumePreview();
+        debugPrint("BLE mesh verification failed for pattern: $e");
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pop();
+          _showError(
+            'BLE Verification failed. Ensure Bluetooth is on and you are near the teacher.',
+          );
+          setState(() => isProcessing = false);
+        }
+        if (_cameraController != null &&
+            _cameraController!.value.isInitialized) {
+          await _cameraController!.resumePreview();
+          await _enforceTorch(_cameraController!);
+        }
         return;
       }
 
@@ -642,7 +734,11 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         } else {
           _showError(result['message'] ?? 'Verification failed');
           setState(() => isProcessing = false);
-          await _cameraController!.resumePreview();
+          if (_cameraController != null &&
+              _cameraController!.value.isInitialized) {
+            await _cameraController!.resumePreview();
+            await _enforceTorch(_cameraController!);
+          }
         }
       }
     } catch (e) {
@@ -651,10 +747,36 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         setState(() => isProcessing = false);
         if (_cameraController != null &&
             _cameraController!.value.isInitialized) {
-          _cameraController!.resumePreview();
+          await _cameraController!.resumePreview();
+          await _enforceTorch(_cameraController!);
         }
       }
     }
+  }
+
+  void _showPermissionDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Camera Permission Required'),
+        content: const Text(
+          'This app needs camera access to scan QR codes for attendance. Please grant camera permission in app settings.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              openAppSettings();
+            },
+            child: const Text('Open Settings'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showError(String message) {
@@ -809,7 +931,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               else
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.2),
+                    color: Colors.white.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: IconButton(
@@ -847,23 +969,19 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                     ),
                     tooltip: 'Toggle Flash',
                     onPressed: () async {
-                      if (isPatternMode) {
-                        if (_cameraController != null &&
-                            _cameraController!.value.isInitialized) {
-                          final newMode =
-                              _isTorchOn ? FlashMode.off : FlashMode.torch;
+                      if (_cameraController != null &&
+                          _cameraController!.value.isInitialized) {
+                        final newMode =
+                            _isTorchOn ? FlashMode.off : FlashMode.torch;
+                        try {
                           await _cameraController!.setFlashMode(newMode);
-                          setState(() => _isTorchOn = !_isTorchOn);
-                        }
-                      } else {
-                        if (_scannerController != null &&
-                            _scannerController!.value.isRunning) {
-                          await _scannerController!.toggleTorch();
-                          setState(() {
-                            _isTorchOn =
-                                _scannerController!.value.torchState ==
-                                TorchState.on;
-                          });
+                          if (mounted) {
+                            setState(
+                              () => _isTorchOn = newMode == FlashMode.torch,
+                            );
+                          }
+                        } catch (e) {
+                          debugPrint('Toggle torch failed: $e');
                         }
                       }
                     },
@@ -893,106 +1011,26 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       ),
       body: Stack(
         children: [
-          // Camera Background
+          // 1. Camera Viewport
           if (_cameraPermissionGranted)
             Positioned.fill(
               child: GestureDetector(
                 onScaleStart: _handleScaleStart,
                 onScaleUpdate: _handleScaleUpdate,
-                child: isPatternMode
-                    ? (_cameraController != null &&
-                              _cameraController!.value.isInitialized
-                          ? CameraPreview(_cameraController!)
-                          : const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.orangeAccent,
-                              ),
-                            ))
-                    : (_scannerController != null
-                          ? MobileScanner(
-                              controller: _scannerController!,
-                              errorBuilder: (context, error, child) {
-                                return ColoredBox(
-                                  color: Colors.black,
-                                  child: Center(
-                                    child: Padding(
-                                      padding: const EdgeInsets.symmetric(
-                                        horizontal: 24,
-                                      ),
-                                      child: Column(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(
-                                            Icons.videocam_off_outlined,
-                                            color: Colors.orangeAccent,
-                                            size: 56,
-                                          ),
-                                          const SizedBox(height: 16),
-                                          const Text(
-                                            'Camera Busy or Initializing',
-                                            style: TextStyle(
-                                              color: Colors.white,
-                                              fontSize: 16,
-                                              fontWeight: FontWeight.bold,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 8),
-                                          Text(
-                                            'Releasing camera hardware... (${error.errorCode.name})',
-                                            textAlign: TextAlign.center,
-                                            style: const TextStyle(
-                                              color: Colors.white70,
-                                              fontSize: 13,
-                                            ),
-                                          ),
-                                          const SizedBox(height: 20),
-                                          ElevatedButton.icon(
-                                            onPressed: _initializeQRScanner,
-                                            icon: const Icon(
-                                              Icons.refresh,
-                                              size: 18,
-                                            ),
-                                            label: const Text('Retry Camera'),
-                                            style: ElevatedButton.styleFrom(
-                                              backgroundColor: Colors.teal,
-                                              foregroundColor: Colors.white,
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 20,
-                                                    vertical: 10,
-                                                  ),
-                                              shape: RoundedRectangleBorder(
-                                                borderRadius:
-                                                    BorderRadius.circular(10),
-                                              ),
-                                            ),
-                                          ),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              },
-                              onDetect: (capture) {
-                                if (isPatternMode) return;
-                                final List<Barcode> barcodes = capture.barcodes;
-                                for (final barcode in barcodes) {
-                                  if (barcode.rawValue != null) {
-                                    _handleQRCode(barcode.rawValue!);
-                                    break;
-                                  }
-                                }
-                              },
-                            )
-                          : const Center(
-                              child: CircularProgressIndicator(
-                                color: Colors.teal,
-                              ),
-                            )),
+                child: (_cameraController != null &&
+                        _cameraController!.value.isInitialized)
+                    ? CameraPreview(_cameraController!)
+                    : Center(
+                        child: CircularProgressIndicator(
+                          color: isPatternMode
+                              ? Colors.orangeAccent
+                              : const Color(0xFF007C91),
+                        ),
+                      ),
               ),
             )
           else
-            // No permission
+            // No permission view
             Container(
               color: Colors.black87,
               child: const Center(
@@ -1010,7 +1048,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               ),
             ),
 
-          // Scanning Frame Overlay
+          // 2. Scanning Frame Overlay
           Center(
             child: IgnorePointer(
               child: Container(
@@ -1050,7 +1088,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
             ),
           ),
 
-          // Corner Markers
+          // 3. Corner Markers (when not processing and not completed)
           if (!isProcessing && !hasScanned) ...[
             _buildCornerMarker(Alignment.topLeft),
             _buildCornerMarker(Alignment.topRight),
@@ -1058,7 +1096,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
             _buildCornerMarker(Alignment.bottomRight),
           ],
 
-          // Instructions or Capture Button
+          // 4. Mode-specific Instruction / Action Bottom Card
           Positioned(
             bottom: 100,
             left: 0,
@@ -1067,7 +1105,7 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               margin: const EdgeInsets.symmetric(horizontal: 24),
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: Colors.black.withOpacity(0.7),
+                color: Colors.black.withValues(alpha: 0.7),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: isPatternMode
@@ -1104,7 +1142,9 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.orange.shade400,
                               foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              padding: const EdgeInsets.symmetric(
+                                vertical: 14,
+                              ),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -1120,8 +1160,8 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                           hasScanned
                               ? Icons.check_circle
                               : (isProcessing
-                                    ? Icons.hourglass_empty
-                                    : Icons.qr_code_scanner),
+                                  ? Icons.hourglass_empty
+                                  : Icons.qr_code_scanner),
                           color: hasScanned
                               ? Colors.green
                               : (isProcessing ? Colors.orange : Colors.white),
@@ -1132,8 +1172,8 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                           hasScanned
                               ? 'Attendance Marked Successfully!'
                               : (isProcessing
-                                    ? 'Verifying...'
-                                    : 'Position QR code within the frame'),
+                                  ? 'Verifying...'
+                                  : 'Position QR code within the frame'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: Colors.white,
@@ -1160,23 +1200,19 @@ class _QRScannerScreenState extends State<QRScannerScreen>
           height: 30,
           decoration: BoxDecoration(
             border: Border(
-              top:
-                  alignment == Alignment.topLeft ||
+              top: alignment == Alignment.topLeft ||
                       alignment == Alignment.topRight
                   ? const BorderSide(color: Colors.green, width: 4)
                   : BorderSide.none,
-              bottom:
-                  alignment == Alignment.bottomLeft ||
+              bottom: alignment == Alignment.bottomLeft ||
                       alignment == Alignment.bottomRight
                   ? const BorderSide(color: Colors.green, width: 4)
                   : BorderSide.none,
-              left:
-                  alignment == Alignment.topLeft ||
+              left: alignment == Alignment.topLeft ||
                       alignment == Alignment.bottomLeft
                   ? const BorderSide(color: Colors.green, width: 4)
                   : BorderSide.none,
-              right:
-                  alignment == Alignment.topRight ||
+              right: alignment == Alignment.topRight ||
                       alignment == Alignment.bottomRight
                   ? const BorderSide(color: Colors.green, width: 4)
                   : BorderSide.none,
@@ -1186,6 +1222,4 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       ),
     );
   }
-
-
 }
