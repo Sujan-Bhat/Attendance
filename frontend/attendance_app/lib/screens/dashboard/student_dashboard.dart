@@ -280,6 +280,8 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
 
     // Step 2 (QR/Pattern Scan) & Step 3 (BLE Verification)
     if (verified == true && mounted) {
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (!mounted) return;
       Navigator.push(
         context,
         MaterialPageRoute(builder: (context) => const QRScannerScreen()),

@@ -115,7 +115,10 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
             await _cameraController!.dispose();
             _cameraController = null;
           }
-          Navigator.pop(context, true);
+          await Future.delayed(const Duration(milliseconds: 250));
+          if (mounted) {
+            Navigator.pop(context, true);
+          }
         }
       } else {
         await Future.delayed(const Duration(seconds: 2));
