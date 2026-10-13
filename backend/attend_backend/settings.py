@@ -30,12 +30,11 @@ SECRET_KEY = os.getenv("SECRET_KEY")
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = os.getenv("DJANGO_DEBUG", "False").lower() == "true"
 
-# ALLOWED_HOSTS = [
-#     host.strip()
-#     for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
-#     if host.strip()
-# ]
-ALLOWED_HOSTS = ['localhost', '127.0.0.1', '0.0.0.0', '192.168.0.13']#remove this
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,0.0.0.0,192.168.0.13,.devtunnels.ms,.azurewebsites.net,*").split(",")
+    if host.strip()
+]
 AUTH_USER_MODEL = 'attendance.User'
 
 #ADD THESE LINES (Optional - for documentation)
@@ -91,9 +90,14 @@ WSGI_APPLICATION = 'attend_backend.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
+if os.getenv('WEBSITE_SITE_NAME'):
+    db_path = '/home/db.sqlite3'
+else:
+    db_path = BASE_DIR / 'db.sqlite3'
+
 DATABASES = {
     'default': dj_database_url.parse(
-        os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'db.sqlite3'}")
+        os.getenv("DATABASE_URL", f"sqlite:///{db_path}")
     )
 }
 
@@ -166,7 +170,7 @@ CORS_ALLOWED_ORIGINS = [
     origin.strip()
     for origin in os.getenv(
         "CORS_ALLOWED_ORIGINS",
-        "http://localhost:3000,http://localhost:8080,http://localhost:5000,http://localhost:59371",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8080,http://localhost:5000,http://localhost:59371,https://presence-cne6ezafcncnduf3.indiasouthcentral-01.azurewebsites.net",
     ).split(",")
     if origin.strip()
 ]
@@ -174,10 +178,19 @@ CORS_ALLOWED_ORIGINS = [
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "True").lower() == "true"
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
-    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    for origin in os.getenv(
+        "CSRF_TRUSTED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000,http://localhost:8000,http://127.0.0.1:8000,https://presence-cne6ezafcncnduf3.indiasouthcentral-01.azurewebsites.net",
+    ).split(",")
     if origin.strip()
 ]
 
-# CORS settings
-# CORS_ALLOW_CREDENTIALS = True
-CORS_ALLOW_CREDENTIALS = False# change this
+from corsheaders.defaults import default_headers
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    'bypass-tunnel-reminder',
+    'content-type',
+    'authorization',
+]
+
+CORS_ALLOW_CREDENTIALS = True

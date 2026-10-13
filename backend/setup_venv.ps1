@@ -4,7 +4,7 @@ Set-Location $PSScriptRoot
 
 if (-not (Test-Path ".venv")) {
     Write-Host "Creating .venv ..."
-    python -m venv .venv
+    py -3.12 -m venv .venv
 }
 
 Write-Host "Installing requirements into .venv ..."

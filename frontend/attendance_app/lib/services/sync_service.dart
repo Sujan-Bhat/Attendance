@@ -6,6 +6,9 @@ import 'package:path/path.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'attendance_service.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:connectivity_plus/connectivity_plus.dart';
+import '../main.dart';
 
 class SyncService {
   static final SyncService _instance = SyncService._internal();
@@ -18,9 +21,12 @@ class SyncService {
   final AttendanceService _attendanceService = AttendanceService();
   Timer? _syncTimer;
   bool _isSyncing = false;
+  int _syncCycleCount = 0;
+  final Map<dynamic, int> _retryCountMap = {};
 
   SyncService._internal() {
     _startPeriodicSync();
+    _listenForConnectivityChanges();
   }
 
   void _startPeriodicSync() {
@@ -28,6 +34,42 @@ class SyncService {
     _syncTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       syncQueueToServer();
     });
+  }
+
+  /// Instantly trigger sync when the device regains connectivity.
+  void _listenForConnectivityChanges() {
+    Connectivity().onConnectivityChanged.listen((results) {
+      final isOnline = results.isNotEmpty && !results.contains(ConnectivityResult.none);
+      if (isOnline && !_isSyncing) {
+        debugPrint('[SyncService] Connectivity restored! Resetting backoff and triggering immediate sync...');
+        _retryCountMap.clear();
+        syncQueueToServer();
+      }
+    });
+  }
+
+  /// Exponential backoff: items that keep failing are retried less frequently.
+  /// - Attempts 0-2: every cycle (30s)
+  /// - Attempts 3-5: every 2nd cycle (60s)
+  /// - Attempts 6-10: every 4th cycle (2min)
+  /// - Attempts 11-20: every 10th cycle (5min)
+  /// - Attempts >20: every 30th cycle (15min)
+  /// Note: Items are never permanently failed by count; they naturally expire after 24 hours.
+  bool _shouldRetryItem(dynamic itemId) {
+    final count = _retryCountMap[itemId] ?? 0;
+    if (count < 3) return true;
+    if (count < 6) return _syncCycleCount % 2 == 0;
+    if (count < 11) return _syncCycleCount % 4 == 0;
+    if (count < 21) return _syncCycleCount % 10 == 0;
+    return _syncCycleCount % 30 == 0;
+  }
+
+  void _recordRetryFailure(dynamic itemId) {
+    _retryCountMap[itemId] = (_retryCountMap[itemId] ?? 0) + 1;
+  }
+
+  void _clearRetryCount(dynamic itemId) {
+    _retryCountMap.remove(itemId);
   }
 
   Future<Database> get database async {
@@ -42,7 +84,7 @@ class SyncService {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
           await db.execute('''
@@ -108,6 +150,22 @@ class SyncService {
             // Ignore if columns already exist
           }
         }
+        if (oldVersion < 7) {
+          try {
+            await db.execute(
+              'ALTER TABLE offline_sessions ADD COLUMN totp_secret TEXT',
+            );
+            await db.execute(
+              'ALTER TABLE offline_sessions ADD COLUMN rotation_interval INTEGER',
+            );
+            // Re-run this just in case the user's DB missed it during version 5
+            await db.execute(
+              'ALTER TABLE offline_qr_queue ADD COLUMN qr_token TEXT',
+            );
+          } catch (e) {
+            // Ignore if columns already exist
+          }
+        }
       },
       onCreate: (db, version) async {
         await db.execute('''
@@ -130,6 +188,8 @@ class SyncService {
             end_time TEXT NOT NULL,
             shape_data TEXT,
             reference_image_path TEXT,
+            totp_secret TEXT,
+            rotation_interval INTEGER,
             status TEXT DEFAULT 'pending'
           )
         ''');
@@ -239,6 +299,8 @@ class SyncService {
     required String startTime,
     required String endTime,
     String? shapeData,
+    String? totpSecret,
+    int? rotationInterval,
   }) async {
     final item = {
       'id': id,
@@ -248,6 +310,8 @@ class SyncService {
       'start_time': startTime,
       'end_time': endTime,
       'shape_data': shapeData,
+      'totp_secret': totpSecret,
+      'rotation_interval': rotationInterval,
       'status': 'pending',
     };
 
@@ -290,6 +354,7 @@ class SyncService {
   Future<void> syncQueueToServer() async {
     if (_isSyncing) return;
     _isSyncing = true;
+    _syncCycleCount++;
     bool anythingSynced = false;
 
     try {
@@ -320,6 +385,27 @@ class SyncService {
           final endTime = session['end_time'] as String;
           final shapeData = session['shape_data'] as String?;
           final referenceImagePath = session['reference_image_path'] as String?;
+          final totpSecret = session['totp_secret'] as String?;
+          final rotationInterval = session['rotation_interval'] as int?;
+
+          // Check 24-hour expiration
+          final sessionStartTime = DateTime.parse(startTime);
+          if (DateTime.now().toUtc().difference(sessionStartTime.toUtc()).inHours >= 24) {
+            debugPrint('Discarding expired offline session $id (older than 24 hours)');
+            if (kIsWeb) {
+              final list = await _getWebList('offline_sessions');
+              list.removeWhere((e) => e['id'] == id);
+              await _saveWebList('offline_sessions', list);
+            } else {
+              final db = await database;
+              await db.delete(
+                'offline_sessions',
+                where: 'id = ?',
+                whereArgs: [id],
+              );
+            }
+            continue;
+          }
 
           try {
             final result = await _attendanceService.syncOfflineSession(
@@ -331,6 +417,8 @@ class SyncService {
               endTime: endTime,
               shapeData: shapeData,
               referenceImagePath: referenceImagePath,
+              totpSecret: totpSecret,
+              rotationInterval: rotationInterval,
             );
 
             if (result['success']) {
@@ -426,6 +514,11 @@ class SyncService {
           final bleHopCount = record['ble_hop_count'] as int?;
           final bleRssi = record['ble_rssi'] as int?;
 
+          // Exponential backoff: skip items that are backing off
+          if (!_shouldRetryItem('pattern_$id')) {
+            continue;
+          }
+
           try {
             final result = await _attendanceService.syncOfflinePattern(
               imagePath: imagePath,
@@ -448,13 +541,44 @@ class SyncService {
                   whereArgs: [id],
                 );
               }
-              debugPrint('Successfully synced record $id');
+              _clearRetryCount('pattern_$id');
+              debugPrint('Successfully processed record $id');
+              
+              if (result['status'] == 'failed_retry') {
+                final context = navigatorKey.currentContext;
+                if (context != null) {
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext ctx) {
+                      return AlertDialog(
+                        title: const Text('Scan Failed'),
+                        content: Text(result['message'] ?? 'Verification failed. The session is still active, please scan again.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      );
+                    }
+                  );
+                }
+              } else {
+                scaffoldMessengerKey.currentState?.showSnackBar(
+                  SnackBar(
+                    content: Text(result['message'] ?? 'Offline attendance synced successfully'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
               anythingSynced = true;
             } else {
-              debugPrint('Failed to sync record $id: ${result['message']}');
+              _recordRetryFailure('pattern_$id');
+              debugPrint('[SyncService] Failed pattern $id (attempt ${_retryCountMap['pattern_$id'] ?? 0}): ${result['message']}');
             }
           } catch (e) {
-            debugPrint('Error syncing record $id: $e');
+            _recordRetryFailure('pattern_$id');
+            debugPrint('[SyncService] Error syncing pattern $id: $e');
           }
         }
       }
@@ -482,7 +606,6 @@ class SyncService {
           final sessionId = record['session_id'] as String;
           final timestamp = record['timestamp'] as String;
           final qrToken = record['qr_token'] as String?;
-          final captcha = record['captcha'] as String?;
 
           // Check 24-hour expiration
           final scanTime = DateTime.parse(timestamp);
@@ -507,11 +630,15 @@ class SyncService {
           final bleHopCount = record['ble_hop_count'] as int?;
           final bleRssi = record['ble_rssi'] as int?;
 
+          // Exponential backoff: skip items that are backing off
+          if (!_shouldRetryItem('qr_$id')) {
+            continue;
+          }
+
           try {
             final result = await _attendanceService.markAttendance(
               sessionId,
               qrToken: qrToken,
-              captcha: captcha,
               isOfflineSync: true,
               timestamp: timestamp,
               bleHopCount: bleHopCount,
@@ -531,13 +658,44 @@ class SyncService {
                   whereArgs: [id],
                 );
               }
-              debugPrint('Successfully synced QR record $id');
+              _clearRetryCount('qr_$id');
+              debugPrint('Successfully processed QR record $id');
+              
+              if (result['status'] == 'failed_retry') {
+                final context = navigatorKey.currentContext;
+                if (context != null) {
+                  showDialog(
+                    context: context,
+                    builder: (BuildContext ctx) {
+                      return AlertDialog(
+                        title: const Text('Scan Failed'),
+                        content: Text(result['message'] ?? 'Verification failed. The session is still active, please scan again.'),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.of(ctx).pop(),
+                            child: const Text('OK'),
+                          ),
+                        ],
+                      );
+                    }
+                  );
+                }
+              } else {
+                scaffoldMessengerKey.currentState?.showSnackBar(
+                  SnackBar(
+                    content: Text(result['message'] ?? 'Offline attendance synced successfully'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              }
               anythingSynced = true;
             } else {
-              debugPrint('Failed to sync QR record $id: ${result['message']}');
+              _recordRetryFailure('qr_$id');
+              debugPrint('[SyncService] Failed QR $id (attempt ${_retryCountMap['qr_$id'] ?? 0}): ${result['message']}');
             }
           } catch (e) {
-            debugPrint('Error syncing QR record $id: $e');
+            _recordRetryFailure('qr_$id');
+            debugPrint('[SyncService] Error syncing QR $id: $e');
           }
         }
       }
@@ -556,7 +714,6 @@ class SyncService {
     int? bleHopCount,
     int? bleRssi,
     String? qrToken,
-    String? captcha,
   }) async {
     final item = {
       'id': DateTime.now().millisecondsSinceEpoch,
@@ -565,7 +722,6 @@ class SyncService {
       'ble_hop_count': bleHopCount,
       'ble_rssi': bleRssi,
       'qr_token': qrToken,
-      'captcha': captcha,
       'status': 'pending',
     };
 

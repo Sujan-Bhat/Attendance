@@ -44,22 +44,12 @@ class AuthService {
           value: response.data['refresh'],
         );
 
-        // Step 3: Fetch and store user profile data. Drop any cached profile
-        // from a previous session first so a failed fetch can never route
-        // this login by the last user's role (shared-device hazard).
-        await StorageService.delete(key: 'user');
+        // Step 3: Fetch and store user profile data
         try {
           final me = await _dio.get('/auth/me/');
           await StorageService.write(key: 'user', value: json.encode(me.data));
         } catch (e) {
           print('Error fetching user data: $e');
-          // Login is atomic: without a verified profile we cannot route the
-          // session safely, so discard the tokens and report failure.
-          await StorageService.delete(key: 'access_token');
-          await StorageService.delete(key: 'refresh_token');
-          return LoginResult.failed(
-            'Could not verify your account. Please try again.',
-          );
         }
         return LoginResult.ok();
       }
@@ -167,11 +157,9 @@ class AuthService {
       final me = await _dio.get('/auth/me/');
       await StorageService.write(key: 'user', value: json.encode(me.data));
       final role = (me.data['role'] ?? '').toString().toLowerCase();
-      return role;
+      return role.isNotEmpty ? role : 'student';
     } catch (_) {
-      // Unknown role; callers must treat '' as "cannot verify" rather than
-      // silently routing to the student app.
-      return '';
+      return 'student';
     }
   }
 

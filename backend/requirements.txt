@@ -17,9 +17,10 @@ Pillow==10.4.0
 # AI verification + image processing dependencies
 google-genai==1.75.0
 opencv-python-headless==4.12.0.88
-numpy==2.2.6
+numpy>=2.2.0
 python-dateutil==2.9.0.post0
+--find-links wheels
+--find-links backend/wheels
 insightface==1.0.1
 onnxruntime==1.28.0
 openpyxl==3.1.5
-reportlab==5.0.1

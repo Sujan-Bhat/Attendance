@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../services/class_service.dart';
-import '../../utils/semester_utils.dart';
 import '../../widgets/admin_web_layout.dart';
 import 'admin_class_detail_screen.dart';
-import 'admin_navigation.dart';
 import 'widgets/admin_animated_card.dart';
 import 'widgets/admin_entrance.dart';
-import 'widgets/admin_export_button.dart';
 import 'widgets/admin_header_actions.dart';
 
 abstract class _AppColors {
@@ -48,10 +45,6 @@ class ManageClassesScreen extends StatefulWidget {
 class _ManageClassesScreenState extends State<ManageClassesScreen> {
   bool _isLoading = false;
   String? _errorMessage;
-
-  /// Non-blocking warning when the secondary fetch (teachers) fails but the
-  /// semester summary rendered fine.
-  String? _warningMessage;
   final ClassService _classService = ClassService();
   List<_SemesterCard> _semesters = [];
   List<Map<String, dynamic>> _teachers = [];
@@ -86,93 +79,71 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _warningMessage = null;
     });
 
-    // Primary fetch: the semester summary. A failure here is fatal.
-    final List<Map<String, dynamic>> summary;
     try {
-      final raw = await _classService.getAdminClassesSummary();
-      summary = List<Map<String, dynamic>>.from(raw);
+      final results = await Future.wait([
+        _classService.getAdminClassesSummary(),
+        _classService.getTeachers(),
+      ]);
+      final summary = results[0] as List<Map<String, dynamic>>;
+      final teachersData = results[1] as Map<String, dynamic>;
+
+      if (mounted) {
+        const colorPalette = [
+          Color(0xFF6C5CE7),
+          Color(0xFFE4B40B),
+          Color(0xFFA83FD9),
+          Color(0xFF4FBDD6),
+          Color(0xFF66BB6A),
+          Color(0xFFFF7043),
+        ];
+
+        const gradientPalette = [
+          [Color(0xFF9C8BFF), Colors.white],
+          [Color(0xFFE4BD3C), Colors.white],
+          [Color(0xFFBA6CF5), Colors.white],
+          [Color(0xFF3AB0E6), Colors.white],
+          [Color(0xFF81C784), Colors.white],
+          [Color(0xFFFFA270), Colors.white],
+        ];
+
+        final teacherList =
+            List<Map<String, dynamic>>.from(teachersData['teachers'] ?? []);
+
+        setState(() {
+          _semesters = summary.where((data) {
+            final classCount =
+                int.tryParse(data['class_count']?.toString() ?? '') ?? 0;
+            return classCount > 0;
+          }).toList().asMap().entries.map((entry) {
+            final index = entry.key;
+            final data = entry.value;
+            final semesterStr = data['semester']?.toString() ?? '';
+            return _SemesterCard(
+              semesterDisplay: _semesterDisplay(semesterStr),
+              semesterLabel: semesterStr,
+              classCount:
+                  int.tryParse(data['class_count']?.toString() ?? '') ?? 0,
+              studentCount:
+                  int.tryParse(data['student_count']?.toString() ?? '') ?? 0,
+              color: colorPalette[index % colorPalette.length],
+              gradient: gradientPalette[index % gradientPalette.length],
+            );
+          }).toList();
+          _teachers = teacherList;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
-      debugPrint('Error loading class summaries: $e');
+      debugPrint('Error loading semesters: $e');
       if (mounted) {
         setState(() {
           _isLoading = false;
           _errorMessage = 'Could not load class summaries. Please try again.';
         });
       }
-      return;
     }
-
-    // Secondary fetch: the teacher list (used by the filter). A failure here
-    // degrades to semester cards without the filter instead of wiping the
-    // screen.
-    List<Map<String, dynamic>> teacherList = [];
-    try {
-      final teachersData = await _classService.getTeachers();
-      teacherList =
-          List<Map<String, dynamic>>.from(teachersData['teachers'] ?? []);
-    } catch (e) {
-      debugPrint('Error loading teachers: $e');
-      if (mounted) {
-        _warningMessage =
-            'Could not load the teacher list. Teacher filtering is unavailable.';
-      }
-    }
-
-    if (!mounted) return;
-
-    const colorPalette = [
-      Color(0xFF6C5CE7),
-      Color(0xFFE4B40B),
-      Color(0xFFA83FD9),
-      Color(0xFF4FBDD6),
-      Color(0xFF66BB6A),
-      Color(0xFFFF7043),
-    ];
-
-    const gradientPalette = [
-      [Color(0xFF9C8BFF), Colors.white],
-      [Color(0xFFE4BD3C), Colors.white],
-      [Color(0xFFBA6CF5), Colors.white],
-      [Color(0xFF3AB0E6), Colors.white],
-      [Color(0xFF81C784), Colors.white],
-      [Color(0xFFFFA270), Colors.white],
-    ];
-
-    // Numeric-aware sort so "Semester 2" precedes "Semester 10" (the server
-    // returns lexicographic order). Colors are assigned after sorting so each
-    // semester keeps a stable color.
-    final visible = summary.where((data) {
-      final classCount =
-          int.tryParse(data['class_count']?.toString() ?? '') ?? 0;
-      return classCount > 0;
-    }).toList()
-      ..sort((a, b) => compareSemesters(
-            a['semester']?.toString() ?? '',
-            b['semester']?.toString() ?? '',
-          ));
-
-    setState(() {
-      _semesters = visible.asMap().entries.map((entry) {
-        final index = entry.key;
-        final data = entry.value;
-        final semesterStr = data['semester']?.toString() ?? '';
-        return _SemesterCard(
-          semesterDisplay: _semesterDisplay(semesterStr),
-          semesterLabel: semesterStr,
-          classCount:
-              int.tryParse(data['class_count']?.toString() ?? '') ?? 0,
-          studentCount:
-              int.tryParse(data['student_count']?.toString() ?? '') ?? 0,
-          color: colorPalette[index % colorPalette.length],
-          gradient: gradientPalette[index % gradientPalette.length],
-        );
-      }).toList();
-      _teachers = teacherList;
-      _isLoading = false;
-    });
   }
 
   String _semesterDisplay(String raw) {
@@ -195,12 +166,19 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
     return List<Map<String, dynamic>>.from(teacher['classes'] ?? []);
   }
 
-  int _compareSemester(String a, String b) => compareSemesters(a, b);
+  int _compareSemester(String a, String b) {
+    final ai = int.tryParse(a.trim());
+    final bi = int.tryParse(b.trim());
+    if (ai != null && bi != null) return ai.compareTo(bi);
+    if (ai != null) return -1;
+    if (bi != null) return 1;
+    return a.compareTo(b);
+  }
 
-  Future<void> _openClassDetail(Map<String, dynamic> cls) async {
+  void _openClassDetail(Map<String, dynamic> cls) {
     final classId = int.tryParse(cls['id']?.toString() ?? '');
     if (classId == null) return;
-    await Navigator.push(
+    Navigator.push(
       context,
       MaterialPageRoute(
         builder: (context) => AdminClassDetailScreen(
@@ -210,9 +188,6 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
         ),
       ),
     );
-    // Class edits/removals happen on the detail screen; refresh counts on
-    // return so this list never shows stale student totals.
-    if (mounted) _loadSemesters();
   }
 
   @override
@@ -243,10 +218,6 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
                   children: [
                     _buildHeaderSection(isMobile),
                     const SizedBox(height: 16),
-                    if (_warningMessage != null) ...[
-                      _buildWarningBanner(),
-                      const SizedBox(height: 12),
-                    ],
                     if (_teachers.isNotEmpty && !_isLoading) ...[
                       _buildTeacherFilter(isMobile),
                       const SizedBox(height: 20),
@@ -282,10 +253,6 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
                 children: [
                   _buildDesktopHeader(),
                   const SizedBox(height: 20),
-                  if (_warningMessage != null) ...[
-                    _buildWarningBanner(),
-                    const SizedBox(height: 12),
-                  ],
                   if (_teachers.isNotEmpty && !_isLoading) ...[
                     _buildTeacherFilter(false),
                     const SizedBox(height: 24),
@@ -369,11 +336,10 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
             ],
           ),
         ),
-        const AdminExportButton(dataset: 'classes'),
         AdminHeaderActions(onRefresh: _loadSemesters, showLogout: false),
         IconButton(
           icon: const Icon(Icons.arrow_back_rounded, color: _AppColors.textPrimary),
-          onPressed: () => backToAdminDashboard(context),
+          onPressed: () => Navigator.pop(context),
           tooltip: 'Back',
         ),
       ],
@@ -386,7 +352,7 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
         if (isMobile)
           IconButton(
             icon: const Icon(Icons.arrow_back_rounded, color: _AppColors.textPrimary),
-            onPressed: () => backToAdminDashboard(context),
+            onPressed: () => Navigator.pop(context),
           ),
         const Icon(Icons.class_rounded, color: _AppColors.tealDark, size: 32),
         const SizedBox(width: 12),
@@ -400,7 +366,6 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
             ),
           ),
         ),
-        const AdminExportButton(dataset: 'classes'),
         AdminHeaderActions(onRefresh: _loadSemesters, showLogout: false),
       ],
     );
@@ -419,8 +384,8 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
         color: semester.color,
         gradient: semester.gradient,
         compact: isCompact,
-        onTap: () async {
-          await Navigator.push(
+        onTap: () {
+          Navigator.push(
             context,
             MaterialPageRoute(
               builder: (context) => ManageSemesterClassesScreen(
@@ -429,9 +394,6 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
               ),
             ),
           );
-          // Classes may have been edited on the drill-down screen; refresh
-          // the semester counts on return.
-          if (mounted) _loadSemesters();
         },
         trailing: Icon(
           isCompact
@@ -464,10 +426,7 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
         crossAxisCount: crossAxisCount,
         mainAxisSpacing: isCompact ? 14 : 42,
         crossAxisSpacing: isCompact ? 18 : 55,
-        // Compact cards get a fixed height (AdminAnimatedCard needs ~103px);
-        // a width-derived ratio overflows at 600-675px viewport widths.
-        childAspectRatio: 1.6,
-        mainAxisExtent: isCompact ? 116 : null,
+        childAspectRatio: isCompact ? 3.0 : 1.6,
       ),
       itemBuilder: (context, idx) => card(_semesters[idx]),
     );
@@ -557,13 +516,7 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
               controller: textEditingController,
               focusNode: focusNode,
               onChanged: (v) {
-                // Free-typing invalidates a previous pick. Without this the
-                // list kept filtering by the old teacher while the field
-                // displayed something else.
-                final selected = _selectedTeacherUsername;
-                if (selected != null && v.trim() != selected) {
-                  setState(() => _selectedTeacherUsername = null);
-                }
+                _syncTeacherFieldText(v);
               },
               decoration: InputDecoration(
                 labelText: 'Filter by teacher',
@@ -822,37 +775,6 @@ class _ManageClassesScreenState extends State<ManageClassesScreen> {
               color: _AppColors.textMuted,
               fontWeight: FontWeight.w600,
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildWarningBanner() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF59E0B).withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: Color(0xFFF59E0B), size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _warningMessage!,
-              style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 16, color: Color(0xFF92400E)),
-            onPressed: () => setState(() => _warningMessage = null),
-            tooltip: 'Dismiss',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
           ),
         ],
       ),
@@ -1190,8 +1112,8 @@ class _ManageSemesterClassesScreenState
       child: InkWell(
         onTap: classId == null
             ? null
-            : () async {
-                await Navigator.push(
+            : () {
+                Navigator.push(
                   context,
                   MaterialPageRoute(
                     builder: (context) => AdminClassDetailScreen(
@@ -1201,9 +1123,6 @@ class _ManageSemesterClassesScreenState
                     ),
                   ),
                 );
-                // Detail edits (rename, reassign, remove student) change the
-                // counts shown here; refresh on return.
-                if (mounted) _loadClasses();
               },
         borderRadius: BorderRadius.circular(16),
         child: Container(

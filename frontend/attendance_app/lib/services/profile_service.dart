@@ -97,32 +97,21 @@ class ProfileService {
               .toList() ??
           [];
 
-      // Count each backend status explicitly: pending_review records are
-      // neither present nor absent and are excluded from the rate's
-      // denominator so awaiting review doesn't drag the rate down.
       final total = attendance.length;
       final present = attendance.where((a) => a['status'] == 'present').length;
-      final absent = attendance.where((a) => a['status'] == 'absent').length;
-      final pending =
-          attendance.where((a) => a['status'] == 'pending_review').length;
-      final graded = present + absent;
-      final rate =
-          graded > 0 ? (present / graded * 100).toStringAsFixed(1) : '0.0';
+      final absent = total - present;
+      final rate = total > 0
+          ? (present / total * 100).toStringAsFixed(1)
+          : '0.0';
 
       return {
         'total': total,
         'present': present,
         'absent': absent,
-        'pending_review': pending,
         'attendance_rate': rate,
       };
     } on DioException catch (e) {
       print('Error getting student stats: ${e.message}');
-      return {'total': 0, 'present': 0, 'absent': 0, 'attendance_rate': '0.0'};
-    } catch (e) {
-      // Malformed response shape (TypeError from casting) must not escape;
-      // fall back to zeroed stats like the DioException path.
-      print('Error parsing student stats: $e');
       return {'total': 0, 'present': 0, 'absent': 0, 'attendance_rate': '0.0'};
     }
   }

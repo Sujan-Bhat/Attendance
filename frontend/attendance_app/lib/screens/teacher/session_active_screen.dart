@@ -193,28 +193,15 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     final tokenHash = sha256.convert(tokenBytes).toString();
     final token = tokenHash.substring(0, 16);
 
-    // Captcha
-    final captchaInput = "$sessionId-$totpSecret-$window-captcha";
-    final captchaBytes = utf8.encode(captchaInput);
-    final captchaHash = sha256.convert(captchaBytes).toString();
-    
-    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-    int num = int.parse(captchaHash.substring(0, 8), radix: 16);
-    String captcha = "";
-    for (int i = 0; i < 4; i++) {
-      captcha += chars[num % chars.length];
-      num = num ~/ chars.length;
-    }
-
     final newQrData = jsonEncode({
       'session_id': sessionId,
       'token': token,
+      if (widget.sessionData['is_offline'] == true) 'is_offline': true,
     });
 
-    if (newQrData != currentQrData || captcha != currentCaptcha) {
+    if (newQrData != currentQrData) {
       setState(() {
         currentQrData = newQrData;
-        currentCaptcha = captcha;
       });
     } else {
       // Just update progress bar
@@ -1013,33 +1000,7 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
             ),
             if (widget.sessionData['class_type'] == 'qr') ...[
               const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                decoration: BoxDecoration(
-                  color: Colors.redAccent.shade100.withOpacity(0.15),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.redAccent, width: 2),
-                ),
-                child: Column(
-                  children: [
-                    const Text(
-                      'CAPTCHA CODE',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.redAccent, letterSpacing: 1.5),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      currentCaptcha,
-                      style: const TextStyle(
-                        fontSize: 32,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 6,
-                        color: Colors.redAccent,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(height: 16),
+
               SizedBox(
                 width: size * 0.8,
                 child: Column(

@@ -49,7 +49,7 @@ dependencies:
 
   provider: ^6.1.1  # For state management
   camera: ^0.12.0+2
-  mobile_scanner: ^5.2.3
+  google_mlkit_barcode_scanning: ^0.15.0
   image: ^4.2.0
   share_plus: ^12.0.2
   app_links: ^7.0.0

@@ -21,7 +21,6 @@ class AttendanceService {
   Future<Map<String, dynamic>> markAttendance(
     String sessionId, {
     String? qrToken,
-    String? captcha,
     bool isOfflineSync = false,
     String? timestamp,
     int? bleHopCount,
@@ -34,9 +33,7 @@ class AttendanceService {
       if (qrToken != null) {
         data['token'] = qrToken;
       }
-      if (captcha != null) {
-        data['captcha'] = captcha;
-      }
+
       if (isOfflineSync) {
         data['is_offline_sync'] = true;
         if (timestamp != null) {
@@ -63,6 +60,7 @@ class AttendanceService {
           'message':
               response.data['message'] ?? 'Attendance marked successfully',
           'data': response.data,
+          'status': response.data['status'],
         };
       }
 
@@ -172,10 +170,8 @@ class AttendanceService {
       return {'success': false, 'message': 'Failed to update status'};
     } on DioException catch (e) {
       return {
-        // Unguarded `data['error']` threw whenever the body was HTML (502,
-        // Django debug page), hiding the real failure.
         'success': false,
-        'message': apiErrorMessage(e, 'Failed to update status'),
+        'message': e.response?.data['error'] ?? 'Failed to update status',
       };
     } catch (e) {
       return {'success': false, 'message': 'Unexpected error: $e'};
@@ -290,6 +286,7 @@ class AttendanceService {
         return {
           'success': true,
           'message': response.data['message'] ?? 'Successfully synced',
+          'status': response.data['status'],
         };
       }
 
@@ -315,6 +312,8 @@ class AttendanceService {
     required String endTime,
     String? shapeData,
     String? referenceImagePath,
+    String? totpSecret,
+    int? rotationInterval,
   }) async {
     try {
       final token = await _getToken();
@@ -330,6 +329,13 @@ class AttendanceService {
 
       if (shapeData != null) {
         mapData['shape_data'] = shapeData;
+      }
+      
+      if (totpSecret != null) {
+        mapData['totp_secret'] = totpSecret;
+      }
+      if (rotationInterval != null) {
+        mapData['rotation_interval'] = rotationInterval.toString();
       }
 
       if (referenceImagePath != null) {

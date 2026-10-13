@@ -356,11 +356,7 @@ class _LoginPageState extends State<LoginPage> with TickerProviderStateMixin {
             Navigator.pushReplacementNamed(context, '/admin');
             break;
           default:
-            _showErrorSnackBar(
-              role.isEmpty
-                  ? 'Could not verify your account role. Please try again.'
-                  : 'Unknown user role: $role',
-            );
+            _showErrorSnackBar('Unknown user role: $role');
             await _authService.logout();
             break;
         }

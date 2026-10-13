@@ -260,7 +260,7 @@ class CreateSessionSerializer(serializers.Serializer):
     duration_minutes = serializers.IntegerField(min_value=1, max_value=300)
     class_type = serializers.ChoiceField(choices=['qr', 'pattern'], default='qr')
     start_time = serializers.DateTimeField(required=False, allow_null=True)
-    rotation_interval = serializers.IntegerField(min_value=5, max_value=300, default=10, required=False)
+    rotation_interval = serializers.IntegerField(min_value=5, max_value=86400, default=10, required=False)
 
     
     def validate_class_id(self, value):

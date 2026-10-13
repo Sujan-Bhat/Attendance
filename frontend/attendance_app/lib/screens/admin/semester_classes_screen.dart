@@ -27,10 +27,6 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
   final ClassService _classService = ClassService();
   bool _isLoading = false;
   String? _errorMessage;
-
-  /// Non-blocking warning when a secondary fetch (e.g. unassigned students)
-  /// fails but the primary data rendered fine.
-  String? _warningMessage;
   List<Map<String, dynamic>> _students = [];
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
@@ -68,66 +64,34 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
     setState(() {
       _isLoading = true;
       _errorMessage = null;
-      _warningMessage = null;
     });
 
     try {
+      final results = await Future.wait([
+        _classService.getSemesterStudents(widget.semesterLabel),
+        _classService.getAdminUnassignedStudents(),
+      ]);
+      final data = results[0];
+      final unassignedData = results[1];
+
       if (widget.showUnassignedOnly) {
-        // Unassigned mode only needs the unassigned list; the semester-students
-        // fetch is pointless here (its result is discarded below).
-        final unassignedData = await _classService.getAdminUnassignedStudents();
-        final unenrolled = List<Map<String, dynamic>>.from(
-          unassignedData['students'] ?? [],
-        );
-        final unreachable = List<Map<String, dynamic>>.from(
+        final reachable = List<Map<String, dynamic>>.from(
           unassignedData['unreachable'] ?? [],
         );
-        final seen = <int>{};
-        final merged = <Map<String, dynamic>>[];
-        for (final s in unenrolled) {
-          final id = s['id'];
-          if (id is int && seen.add(id)) {
-            merged.add({...s, 'classes': const [], 'unassigned': true});
-          }
-        }
-        for (final s in unreachable) {
-          final id = s['id'];
-          if (id is int && seen.add(id)) {
-            merged.add({...s, 'classes': const [], 'unassigned': true});
-          }
-        }
         if (mounted) {
           setState(() {
-            _students = merged;
+            _students = reachable;
             _isLoading = false;
           });
         }
         return;
       }
 
-      // Primary fetch: students enrolled in this semester's classes. A failure
-      // here is fatal (nothing meaningful to render).
-      final data = await _classService.getSemesterStudents(widget.semesterLabel);
-
-      // Secondary fetch: students with a semester but no class. A failure here
-      // degrades to the enrolled list plus a warning instead of wiping the
-      // screen — the enrolled data loaded fine and is still useful.
-      List<Map<String, dynamic>> unassigned = [];
-      try {
-        final unassignedData =
-            await _classService.getAdminUnassignedStudents();
-        unassigned = List<Map<String, dynamic>>.from(
-          unassignedData['students'] ?? [],
-        ).where((s) =>
-            (s['semester']?.toString() ?? '').trim() ==
-            widget.semesterLabel.trim()).toList();
-      } catch (e) {
-        debugPrint('Error loading unassigned students: $e');
-        if (mounted) {
-          _warningMessage =
-              'Could not load unassigned students for this semester.';
-        }
-      }
+      final unassigned = List<Map<String, dynamic>>.from(
+        unassignedData['students'] ?? [],
+      ).where((s) =>
+          (s['semester']?.toString() ?? '').trim() ==
+          widget.semesterLabel.trim());
 
       final seen = <int>{};
       final merged = <Map<String, dynamic>>[
@@ -231,44 +195,10 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
                   ? _buildEmptyState()
                   : Column(
                       children: [
-                        if (_warningMessage != null)
-                          _buildWarningBanner(),
                         _buildSearchBar(),
                         Expanded(child: _buildStudentList()),
                       ],
                     ),
-    );
-  }
-
-  Widget _buildWarningBanner() {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF59E0B).withOpacity(0.12),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFF59E0B).withOpacity(0.4)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber_rounded,
-              color: Color(0xFFF59E0B), size: 18),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _warningMessage!,
-              style: const TextStyle(fontSize: 12.5, color: Color(0xFF92400E)),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.close, size: 16, color: Color(0xFF92400E)),
-            onPressed: () => setState(() => _warningMessage = null),
-            tooltip: 'Dismiss',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(),
-          ),
-        ],
-      ),
     );
   }
 
@@ -624,45 +554,30 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
                   onPressed: isSaving
                       ? null
                       : () async {
-                          final studentId =
-                              int.tryParse(student['id']?.toString() ?? '');
-                          if (studentId == null) {
-                            ScaffoldMessenger.of(this.context).showSnackBar(
-                              const SnackBar(
-                                content: Text('Cannot edit: student id missing'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
-                            return;
-                          }
                           setDialogState(() => isSaving = true);
                           final result = await _classService.updateStudentDetails(
-                            studentId: studentId,
+                            studentId: student['id'],
                             username: nameController.text.trim(),
                             email: emailController.text.trim(),
                           );
-                          if (!mounted) return;
                           if (!ctx.mounted) return;
+                          Navigator.pop(ctx);
                           if (result['error'] != null) {
-                            // Keep the dialog open so the edits survive a
-                            // validation failure.
-                            setDialogState(() => isSaving = false);
                             ScaffoldMessenger.of(this.context).showSnackBar(
                               SnackBar(
-                                content: Text(result['error'].toString()),
+                                content: Text(result['error']),
                                 backgroundColor: Colors.red,
                               ),
                             );
-                            return;
+                          } else {
+                            ScaffoldMessenger.of(this.context).showSnackBar(
+                              const SnackBar(
+                                content: Text('Student updated successfully'),
+                                backgroundColor: Color(0xFF007C91),
+                              ),
+                            );
+                            _loadStudents();
                           }
-                          Navigator.pop(ctx);
-                          ScaffoldMessenger.of(this.context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Student updated successfully'),
-                              backgroundColor: Color(0xFF007C91),
-                            ),
-                          );
-                          _loadStudents();
                         },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: const Color(0xFF007C91),
@@ -704,21 +619,9 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
           ),
           ElevatedButton(
             onPressed: () async {
-              final studentId =
-                  int.tryParse(student['id']?.toString() ?? '');
               Navigator.pop(ctx);
-              if (studentId == null) {
-                if (!mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Cannot delete: student id missing'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-                return;
-              }
               final result = await _classService.adminDeleteStudent(
-                studentId,
+                student['id'],
               );
               if (!mounted) return;
               if (result['error'] == null) {
@@ -772,15 +675,14 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Delete every student in semester $semesterLabel?',
+                    'Delete all $count students in semester $semesterLabel?',
                     style: const TextStyle(fontSize: 15),
                   ),
                   const SizedBox(height: 10),
                   Text(
-                    'This permanently removes every student enrolled in this '
-                    'semester\u2019s classes or assigned to it on their profile '
-                    '($count currently listed), their class enrollments, and '
-                    'attendance history. This action cannot be undone.',
+                    'This permanently removes every student in this semester, '
+                    'their class enrollments, and attendance history. '
+                    'This action cannot be undone.',
                     style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
                   ),
                   const SizedBox(height: 16),
@@ -802,7 +704,10 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx),
+                onPressed: () {
+                  confirmController.dispose();
+                  Navigator.pop(ctx);
+                },
                 child: const Text('Cancel'),
               ),
               ElevatedButton(
@@ -813,30 +718,29 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
                         final result = await _classService.adminDeleteAllStudents(
                           semesterLabel,
                         );
+                        if (!ctx.mounted) return;
+                        Navigator.pop(ctx);
+                        confirmController.dispose();
                         if (!mounted) return;
-                        if (result['error'] != null) {
-                          // Stay open: popping first discarded the typed
-                          // confirmation on every failure.
-                          setDialogState(() => isDeleting = false);
-                          ScaffoldMessenger.of(this.context).showSnackBar(
+                        if (result['error'] == null) {
+                          _loadStudents();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                result['message']?.toString() ??
+                                    'All students deleted successfully',
+                              ),
+                              backgroundColor: const Color(0xFF007C91),
+                            ),
+                          );
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(result['error'].toString()),
                               backgroundColor: Colors.red,
                             ),
                           );
-                          return;
                         }
-                        if (ctx.mounted) Navigator.pop(ctx);
-                        _loadStudents();
-                        ScaffoldMessenger.of(this.context).showSnackBar(
-                          SnackBar(
-                            content: Text(
-                              result['message']?.toString() ??
-                                  'All students deleted successfully',
-                            ),
-                            backgroundColor: const Color(0xFF007C91),
-                          ),
-                        );
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,
@@ -854,6 +758,6 @@ class _SemesterClassesScreenState extends State<SemesterClassesScreen> {
           );
         },
       ),
-    ).whenComplete(() => confirmController.dispose());
+    );
   }
 }

@@ -151,6 +151,10 @@ class _SessionPageState extends State<SessionPage>
           patternCode = freshnessTag;
         }
 
+        final rotationInterval = int.tryParse(rotationIntervalController.text) ?? 10;
+        final rand = Random();
+        final totpSecret = List.generate(16, (index) => rand.nextInt(16).toRadixString(16)).join('');
+
         await SyncService().enqueueSession(
           id: sessionId,
           classId: int.parse(selectedSubjectId!),
@@ -159,6 +163,8 @@ class _SessionPageState extends State<SessionPage>
           startTime: startTime.toIso8601String(),
           endTime: endTime.toIso8601String(),
           shapeData: shapeDataStr,
+          totpSecret: totpSecret,
+          rotationInterval: rotationInterval,
         );
 
         final qrDataMap = {
@@ -193,6 +199,8 @@ class _SessionPageState extends State<SessionPage>
           'class_type': selectedClassType,
           'pattern_code': patternCode,
           'instruction_card': instructionCard,
+          'totp_secret': totpSecret,
+          'rotation_interval': rotationInterval,
           'shape_data': shapeDataStr != null ? jsonDecode(shapeDataStr) : null,
         };
 
