@@ -11,6 +11,10 @@ android {
     ndkVersion = "28.2.13676358"
 
     compileOptions {
+        // Required by google_mlkit_barcode_scanning (ML Kit uses Java 8+ APIs
+        // such as java.time that are missing below API 24). Without this the
+        // barcode scanner can crash on every frame on many devices.
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
@@ -44,5 +48,6 @@ flutter {
 }
 
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }
 

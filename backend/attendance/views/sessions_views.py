@@ -299,8 +299,11 @@ def mark_attendance(request, session_id):
         start_timestamp = session.start_time.timestamp()
         
         valid = False
-        # Allow current, previous, and next windows (total 3 windows to be highly tolerant of drift)
-        for offset in [0, -1, 1]:
+        # Allow the current window plus/minus 2 windows (5 total). The token is
+        # minted on the teacher's phone clock but validated against the server
+        # clock (online) or the student's clock (offline sync), so a few seconds
+        # of drift would otherwise reject a legitimately scanned code.
+        for offset in [0, -1, 1, -2, 2]:
             test_timestamp = target_timestamp + (offset * (session.rotation_interval or 10))
             expected_token = calculate_totp_token(
                 str(session.session_id),

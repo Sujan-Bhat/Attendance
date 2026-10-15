@@ -45,6 +45,17 @@ class _QRScannerScreenState extends State<QRScannerScreen>
   bool hasScanned = false;
   String? scannedData;
 
+  // Decoder diagnostics. Without these, every ML Kit failure is swallowed by
+  // debugPrint and the scanner looks identical to "nothing is happening".
+  int _framesProcessed = 0;
+  int _inputImageErrors = 0;
+  int _decodeErrors = 0;
+  int _consecutiveDecodeErrors = 0;
+  bool _streamStartFailed = false;
+  String? _decoderError;
+  bool _decoderErrorAnnounced = false;
+  String? _cameraInitError;
+
   // Zoom control variables for unified controller
   double _baseZoomLevel = 1.0;
   double _currentZoomLevel = 1.0;
@@ -90,7 +101,10 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       if (_cameraController == null || !_cameraController!.value.isInitialized) {
         _initializeCamera();
       } else {
-        _enforceTorch(_cameraController!);
+        // Only restore the torch if the user explicitly turned it on.
+        if (_isTorchOn) {
+          _enforceTorch(_cameraController!);
+        }
         if (!isPatternMode && !isProcessing && !hasScanned) {
           _startImageStreamSafely();
         }
@@ -166,8 +180,13 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         debugPrint('Error querying zoom levels: $e');
       }
 
-      // Enforce torch on immediately upon initialization with a 5-attempt retry loop
-      await _enforceTorch(controller);
+      // Torch is OFF by default in QR mode. The scanner is normally aimed at a
+      // lit phone screen, and an on-camera flash reflects straight off it and
+      // washes the QR pattern out. Pattern mode photographs a physical board,
+      // so it keeps the flash.
+      if (isPatternMode) {
+        await _enforceTorch(controller);
+      }
 
       // In QR mode, start streaming frames to ML Kit immediately
       if (!isPatternMode && !isProcessing && !hasScanned && mounted) {
@@ -175,6 +194,11 @@ class _QRScannerScreenState extends State<QRScannerScreen>
       }
     } catch (e) {
       debugPrint('Error initializing camera: $e');
+      if (mounted) {
+        setState(() {
+          _cameraInitError = 'Camera failed to start: $e';
+        });
+      }
     } finally {
       if (mounted) {
         setState(() {
@@ -210,10 +234,34 @@ class _QRScannerScreenState extends State<QRScannerScreen>
     if (_cameraController == null || !_cameraController!.value.isInitialized) return;
     if (_cameraController!.value.isStreamingImages) return;
 
-    try {
-      await _cameraController!.startImageStream(_processCameraImage);
-    } catch (e) {
-      debugPrint('Failed to start image stream: $e');
+    // The image stream is what feeds ML Kit. If it never starts, the scanner
+    // shows a live preview but can never detect anything, so retry and then
+    // surface the failure instead of swallowing it.
+    Object? lastError;
+    for (int attempt = 0; attempt < 3; attempt++) {
+      if (_cameraController == null || !_cameraController!.value.isInitialized) return;
+      if (_cameraController!.value.isStreamingImages) return;
+      try {
+        await _cameraController!.startImageStream(_processCameraImage);
+        if (_streamStartFailed && mounted) {
+          setState(() {
+            _streamStartFailed = false;
+            _decoderError = null;
+          });
+        }
+        return;
+      } catch (e) {
+        lastError = e;
+        debugPrint('Failed to start image stream (attempt ${attempt + 1}): $e');
+        await Future.delayed(const Duration(milliseconds: 300));
+      }
+    }
+
+    if (mounted) {
+      setState(() {
+        _streamStartFailed = true;
+        _decoderError = 'Camera frame stream failed to start: $lastError';
+      });
     }
   }
 
@@ -239,25 +287,30 @@ class _QRScannerScreenState extends State<QRScannerScreen>
     try {
       if (isPatternMode) {
         // Switching to Pattern Mode:
-        // Do NOT dispose camera. Simply stop the image stream while keeping the preview live and torch on.
+        // Do NOT dispose camera. Simply stop the image stream while keeping the preview live.
+        // Board-photo capture benefits from the flash, so force it on here.
         await _stopImageStreamSafely();
         if (_cameraController != null && _cameraController!.value.isInitialized) {
           if (_cameraController!.value.isPreviewPaused) {
             await _cameraController!.resumePreview();
           }
-          if (_isTorchOn) {
-            await _enforceTorch(_cameraController!);
-          }
+          await _enforceTorch(_cameraController!);
         }
       } else {
         // Switching to QR Mode:
         // Keep camera live, resume preview if paused, and start the image stream.
+        // Torch stays off: scanning a lit screen with a flash washes out the QR.
         if (_cameraController != null && _cameraController!.value.isInitialized) {
           if (_cameraController!.value.isPreviewPaused) {
             await _cameraController!.resumePreview();
           }
-          if (_isTorchOn) {
-            await _enforceTorch(_cameraController!);
+          try {
+            await _cameraController!.setFlashMode(FlashMode.off);
+          } catch (e) {
+            debugPrint('Failed to turn torch off entering QR mode: $e');
+          }
+          if (mounted) {
+            setState(() => _isTorchOn = false);
           }
           if (!isProcessing && !hasScanned) {
             await _startImageStreamSafely();
@@ -319,45 +372,89 @@ class _QRScannerScreenState extends State<QRScannerScreen>
     return null;
   }
 
-  InputImage? _inputImageFromCameraImage(CameraImage image) {
-    if (image.planes.isEmpty) return null;
-    final rotation = _getImageRotation();
-    if (rotation == null) return null;
+  void _recordInputImageError(String message) {
+    _inputImageErrors++;
+    _decoderError = message;
+    _consecutiveDecodeErrors++;
+    debugPrint('InputImage rejected: $message');
+    _announceDecoderProblem();
+  }
 
-    InputImageFormat? format;
-    if (Platform.isAndroid) {
-      format = InputImageFormatValue.fromRawValue(image.format.raw) ??
-          InputImageFormat.nv21;
-    } else if (Platform.isIOS) {
-      format = InputImageFormatValue.fromRawValue(image.format.raw) ??
-          InputImageFormat.bgra8888;
-    }
-    if (format == null) return null;
-
-    Uint8List bytes;
-    if (image.planes.length == 1) {
-      bytes = image.planes.first.bytes;
-    } else {
-      final int totalLength = image.planes.fold<int>(
-        0,
-        (int sum, Plane plane) => sum + plane.bytes.length,
+  /// Surface a persistent decoder problem in the UI exactly once, so a broken
+  /// pipeline is distinguishable from "the camera preview is simply idle".
+  void _announceDecoderProblem() {
+    if (_decoderErrorAnnounced || !mounted) return;
+    if (_consecutiveDecodeErrors < 5) return;
+    _decoderErrorAnnounced = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      // Refresh the diagnostics panel in the bottom card.
+      setState(() {});
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.error_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text('QR decoder problem: $_decoderError'),
+              ),
+            ],
+          ),
+          backgroundColor: Colors.red.shade700,
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 8),
+        ),
       );
-      final Uint8List concatenated = Uint8List(totalLength);
-      int offset = 0;
-      for (final Plane plane in image.planes) {
-        concatenated.setRange(offset, offset + plane.bytes.length, plane.bytes);
-        offset += plane.bytes.length;
-      }
-      bytes = concatenated;
+    });
+  }
+
+  InputImage? _inputImageFromCameraImage(CameraImage image) {
+    if (image.planes.isEmpty) {
+      _recordInputImageError('Camera delivered a frame with no planes');
+      return null;
+    }
+    final rotation = _getImageRotation();
+    if (rotation == null) {
+      _recordInputImageError('Could not determine frame rotation');
+      return null;
     }
 
+    // camera_android_camerax packs the requested NV21 stream into exactly one
+    // plane. A multi-plane (YUV_420_888) frame cannot be handed to ML Kit by
+    // concatenating the planes: the chroma planes are subsampled and carry
+    // their own row strides, so the resulting buffer is corrupt and decoding
+    // fails on every frame with no visible symptom. Reject it loudly instead.
+    if (image.planes.length != 1) {
+      _recordInputImageError(
+        'Expected a single-plane frame but received ${image.planes.length} planes',
+      );
+      return null;
+    }
+
+    final InputImageFormat? format =
+        InputImageFormatValue.fromRawValue(image.format.raw);
+    if (format == null) {
+      _recordInputImageError(
+        'Unrecognised camera image format (raw=${image.format.raw})',
+      );
+      return null;
+    }
+    if (Platform.isAndroid && format != InputImageFormat.nv21) {
+      _recordInputImageError(
+        'Expected NV21 frames on Android but got ${image.format.raw}',
+      );
+      return null;
+    }
+
+    final Plane plane = image.planes.first;
     return InputImage.fromBytes(
-      bytes: bytes,
+      bytes: plane.bytes,
       metadata: InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
         format: format,
-        bytesPerRow: image.planes.first.bytesPerRow,
+        bytesPerRow: plane.bytesPerRow,
       ),
     );
   }
@@ -373,12 +470,21 @@ class _QRScannerScreenState extends State<QRScannerScreen>
     }
 
     _isDetecting = true;
+    _framesProcessed++;
     try {
       final inputImage = _inputImageFromCameraImage(image);
-      if (inputImage == null) return;
+      if (inputImage == null) {
+        // _inputImageFromCameraImage already recorded and surfaced the reason.
+        return;
+      }
 
       final List<Barcode> barcodes =
           await _barcodeScanner.processImage(inputImage);
+
+      // The decoder produced a result without throwing, so the pipeline is
+      // healthy — this frame simply had no QR code in it.
+      _consecutiveDecodeErrors = 0;
+      _decoderError = null;
 
       if (barcodes.isNotEmpty &&
           !hasScanned &&
@@ -394,7 +500,11 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         }
       }
     } catch (e) {
+      _decodeErrors++;
+      _consecutiveDecodeErrors++;
+      _decoderError = 'ML Kit failed to decode frame: $e';
       debugPrint('ML Kit barcode detection error: $e');
+      _announceDecoderProblem();
     } finally {
       _isDetecting = false;
     }
@@ -434,6 +544,19 @@ class _QRScannerScreenState extends State<QRScannerScreen>
 
       if (sessionId == null) {
         _showError('Invalid QR code');
+        _resumeQRScanningAfterDelay();
+        return;
+      }
+
+      final token = data['token'];
+      if (token == null) {
+        // Until the first rotation tick, the teacher's screen falls back to
+        // metadata QR data that carries no token. It can never validate
+        // server-side, so reject it immediately instead of spending 15s in a
+        // BLE scan first.
+        _showError(
+          'QR code not ready yet. Wait for the "Rotating QR code" countdown, then scan again.',
+        );
         _resumeQRScanningAfterDelay();
         return;
       }
@@ -479,8 +602,6 @@ class _QRScannerScreenState extends State<QRScannerScreen>
         return;
       }
 
-      final token = data['token'];
-
       if (token != null) {
         if (mounted) {
           if (isOffline) {
@@ -517,42 +638,6 @@ class _QRScannerScreenState extends State<QRScannerScreen>
               _showError(result['message']);
               _resumeQRScanningAfterDelay();
             }
-          }
-        }
-      } else {
-        if (isOffline) {
-          final timestamp = DateTime.now().toUtc().toIso8601String();
-          await SyncService().enqueueQRScan(
-            sessionId,
-            timestamp,
-            bleHopCount: bleHopCount,
-            bleRssi: bleRssi,
-          );
-          if (mounted) {
-            setState(() {
-              hasScanned = true;
-              isProcessing = false;
-            });
-            _showSuccessDialog(
-              'Offline Mode: QR scan saved locally. It will sync automatically when internet is restored.',
-            );
-          }
-          return;
-        }
-
-        final result = await _attendanceService.markAttendance(
-          sessionId,
-          bleHopCount: bleHopCount,
-          bleRssi: bleRssi,
-        );
-
-        if (mounted) {
-          if (result['success']) {
-            setState(() => hasScanned = true);
-            _showSuccessDialog(result['message']);
-          } else {
-            _showError(result['message']);
-            _resumeQRScanningAfterDelay();
           }
         }
       }
@@ -1181,6 +1266,43 @@ class _QRScannerScreenState extends State<QRScannerScreen>
                             fontWeight: FontWeight.w500,
                           ),
                         ),
+                        if (_cameraInitError != null ||
+                            _streamStartFailed ||
+                            _decoderError != null) ...[
+                          const SizedBox(height: 10),
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: Colors.red.shade700.withValues(alpha: 0.9),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _cameraInitError ??
+                                      (_streamStartFailed
+                                          ? 'Camera frame stream is not running — QR detection is disabled.'
+                                          : 'QR decoder problem: $_decoderError'),
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 12,
+                                    height: 1.3,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'frames $_framesProcessed · input errors $_inputImageErrors · decode errors $_decodeErrors',
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ],
                     ),
             ),

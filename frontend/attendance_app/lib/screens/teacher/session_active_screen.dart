@@ -200,9 +200,10 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     });
 
     if (newQrData != currentQrData) {
-      setState(() {
-        currentQrData = newQrData;
-      });
+      // Assign directly rather than only inside the setState callback so the
+      // QR data is always populated, including on the initState-time call.
+      currentQrData = newQrData;
+      setState(() {});
     } else {
       // Just update progress bar
       setState(() {});
@@ -718,7 +719,9 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
           children: [
             _buildTimerCard(),
             const SizedBox(height: 16),
-            _buildQRSection(size: 200),
+            // 300 instead of 200: a larger QR is far easier for a second
+            // phone's camera to lock onto when the code is on a screen.
+            _buildQRSection(size: 300),
             const SizedBox(height: 16),
             const SizedBox(height: 16),
               if (widget.sessionData['is_offline'] == true && students.isEmpty)
@@ -991,13 +994,52 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
               ),
             ),
           ] else ...[
-            QrImageView(
-              data: currentQrData.isNotEmpty ? currentQrData : widget.qrCodeData,
-              version: QrVersions.auto,
-              size: size,
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF00838f),
-            ),
+            if (currentQrData.isEmpty &&
+                widget.sessionData['class_type'] == 'qr') ...[
+              // Never fall back to the metadata QR for a rotating-QR session:
+              // it carries no token and can never be validated by the server.
+              // Show a placeholder until the first token is computed instead.
+              Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      'Preparing QR…',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1F2937),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              QrImageView(
+                data: currentQrData.isNotEmpty
+                    ? currentQrData
+                    : widget.qrCodeData,
+                version: QrVersions.auto,
+                size: size,
+                backgroundColor: Colors.white,
+                // Pure black on white gives the decoder maximum contrast. The
+                // previous teal (#00838F) reduced contrast and made screen-to-
+                // screen scanning noticeably less reliable.
+                foregroundColor: Colors.black,
+              ),
+            ],
             if (widget.sessionData['class_type'] == 'qr') ...[
               const SizedBox(height: 16),
 
