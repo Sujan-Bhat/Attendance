@@ -8,6 +8,7 @@ import '../teacher/session_create_screen.dart';
 import '../teacher/teacher_attendance_history_screen.dart';
 import '../teacher/teacher_profile_screen.dart';
 import '../teacher/teacher_announcements_screen.dart';
+import '../analytics/teacher_analytics_screen.dart';
 import '../../widgets/offline_indicator.dart';
 
 class TeacherDashboardMobile extends StatefulWidget {
@@ -218,7 +219,12 @@ class _TeacherDashboardMobileState extends State<TeacherDashboardMobile>
         );
         break;
 
-      //  REMOVED: Class Insights and Reports cases
+      case 'Analytics':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const TeacherAnalyticsScreen()),
+        );
+        break;
 
       default:
         _showComingSoonSnackBar(title);

@@ -22,7 +22,7 @@ class ApiConfig {
     if (_apiBaseUrl.isNotEmpty) return _apiBaseUrl; // CLI --dart-define wins
     if (kIsWeb) {
       final origin = Uri.base.origin;
-      if (origin.isNotEmpty && !origin.contains('localhost') && !origin.contains('127.0.0.1')) {
+      if (origin.isNotEmpty) {
         return '$origin/api/v1';
       }
     }
@@ -75,7 +75,7 @@ class ApiConfig {
 //   static const String _productionUrl =
 //       'https://your-backend.example.com/api/v1';
 
-//   static const bool isProduction = false;
+//   static const bool isProduction = true;
 
 //   // static String get baseUrl {
 //   //   if (_apiBaseUrl.isNotEmpty) {

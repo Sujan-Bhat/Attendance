@@ -11,6 +11,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/offline_indicator.dart';
 import '../../services/ble_mesh_service.dart';
+import 'package:intl/intl.dart';
 
 class SessionActiveScreen extends StatefulWidget {
   final Map<String, dynamic> sessionData;
@@ -122,14 +123,26 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     print('End Time: $endTime'); // Debug
     print('Current Time: ${DateTime.now()}'); // Debug
 
-    final duration = endTime.difference(DateTime.now());
+    int secondsLeft = endTime.difference(DateTime.now()).inSeconds;
+
+    // If session is for a past date or expired on load, use the session's duration so teacher has time to take attendance
+    if (secondsLeft <= 0) {
+      final rawDuration = widget.sessionData['duration_minutes'] ??
+          widget.sessionData['duration'] ??
+          45;
+      final int durationMins = rawDuration is int
+          ? rawDuration
+          : (int.tryParse(rawDuration.toString()) ?? 45);
+      secondsLeft = durationMins * 60;
+    }
 
     setState(() {
-      remainingSeconds = duration.inSeconds > 0 ? duration.inSeconds : 0;
+      remainingSeconds = secondsLeft;
     });
 
-    // Start countdown only if there is time remaining
+    // Start countdown timer
     if (remainingSeconds > 0) {
+      _countdownTimer?.cancel();
       _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
         if (remainingSeconds > 0) {
           setState(() => remainingSeconds--);
@@ -200,9 +213,10 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
     });
 
     if (newQrData != currentQrData) {
-      setState(() {
-        currentQrData = newQrData;
-      });
+      // Assign directly rather than only inside the setState callback so the
+      // QR data is always populated, including on the initState-time call.
+      currentQrData = newQrData;
+      setState(() {});
     } else {
       // Just update progress bar
       setState(() {});
@@ -718,7 +732,9 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
           children: [
             _buildTimerCard(),
             const SizedBox(height: 16),
-            _buildQRSection(size: 200),
+            // 300 instead of 200: a larger QR is far easier for a second
+            // phone's camera to lock onto when the code is on a screen.
+            _buildQRSection(size: 300),
             const SizedBox(height: 16),
             const SizedBox(height: 16),
               if (widget.sessionData['is_offline'] == true && students.isEmpty)
@@ -779,6 +795,15 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
   }
 
   Widget _buildTimerCard() {
+    final startStr = widget.sessionData['start_time'];
+    DateTime? sessionDate;
+    if (startStr != null) {
+      try {
+        sessionDate = DateTime.parse(startStr).toLocal();
+      } catch (_) {}
+    }
+    final isPast = sessionDate != null && sessionDate.isBefore(DateTime.now().subtract(const Duration(hours: 1)));
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: BoxDecoration(
@@ -812,6 +837,24 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
               letterSpacing: 1,
             ),
           ),
+          if (isPast && sessionDate != null) ...[
+            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.25),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                DateFormat('MMM dd').format(sessionDate),
+                style: const TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.white,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -991,13 +1034,52 @@ class _SessionActiveScreenState extends State<SessionActiveScreen> {
               ),
             ),
           ] else ...[
-            QrImageView(
-              data: currentQrData.isNotEmpty ? currentQrData : widget.qrCodeData,
-              version: QrVersions.auto,
-              size: size,
-              backgroundColor: Colors.white,
-              foregroundColor: const Color(0xFF00838f),
-            ),
+            if (currentQrData.isEmpty &&
+                widget.sessionData['class_type'] == 'qr') ...[
+              // Never fall back to the metadata QR for a rotating-QR session:
+              // it carries no token and can never be validated by the server.
+              // Show a placeholder until the first token is computed instead.
+              Container(
+                width: size,
+                height: size,
+                alignment: Alignment.center,
+                padding: const EdgeInsets.all(24),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: Colors.grey.shade300),
+                ),
+                child: const Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    CircularProgressIndicator(),
+                    SizedBox(height: 16),
+                    Text(
+                      'Preparing QR…',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF1F2937),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ] else ...[
+              QrImageView(
+                data: currentQrData.isNotEmpty
+                    ? currentQrData
+                    : widget.qrCodeData,
+                version: QrVersions.auto,
+                size: size,
+                backgroundColor: Colors.white,
+                // Pure black on white gives the decoder maximum contrast. The
+                // previous teal (#00838F) reduced contrast and made screen-to-
+                // screen scanning noticeably less reliable.
+                foregroundColor: Colors.black,
+              ),
+            ],
             if (widget.sessionData['class_type'] == 'qr') ...[
               const SizedBox(height: 16),
 

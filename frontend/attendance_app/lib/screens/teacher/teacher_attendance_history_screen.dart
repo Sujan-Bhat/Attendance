@@ -147,12 +147,13 @@ class _TeacherAttendanceHistoryScreenState
     for (var record in attendanceRecords) {
       final classKey = record['class_name'] ?? 'Unknown Class';
 
-      // Parse with fallback
-      DateTime markedAt;
+      // Parse with fallback (prefer session_date over marked_at)
+      DateTime sessionDate;
       try {
-        markedAt = DateTime.parse(record['marked_at']).toLocal();
+        final rawDate = record['session_date'] ?? record['marked_at'];
+        sessionDate = rawDate != null ? DateTime.parse(rawDate).toLocal() : DateTime.now();
       } catch (e) {
-        markedAt = DateTime.now();
+        sessionDate = DateTime.now();
       }
 
       // Create a unique session key using session_id + datetime
@@ -165,7 +166,7 @@ class _TeacherAttendanceHistoryScreenState
       } else {
         // Group by hour if no session_id (rounded to nearest hour)
         sessionKey =
-            'datetime_${markedAt.year}-${markedAt.month.toString().padLeft(2, '0')}-${markedAt.day.toString().padLeft(2, '0')}_${markedAt.hour.toString().padLeft(2, '0')}';
+            'datetime_${sessionDate.year}-${sessionDate.month.toString().padLeft(2, '0')}-${sessionDate.day.toString().padLeft(2, '0')}_${sessionDate.hour.toString().padLeft(2, '0')}';
       }
 
       if (!groupedData.containsKey(classKey)) {
@@ -186,12 +187,14 @@ class _TeacherAttendanceHistoryScreenState
           DateTime dateA;
           DateTime dateB;
           try {
-            dateA = DateTime.parse(a.value.first['marked_at']).toLocal();
+            final rawA = a.value.first['session_date'] ?? a.value.first['marked_at'];
+            dateA = rawA != null ? DateTime.parse(rawA).toLocal() : DateTime.now();
           } catch (_) {
             dateA = DateTime.now();
           }
           try {
-            dateB = DateTime.parse(b.value.first['marked_at']).toLocal();
+            final rawB = b.value.first['session_date'] ?? b.value.first['marked_at'];
+            dateB = rawB != null ? DateTime.parse(rawB).toLocal() : DateTime.now();
           } catch (_) {
             dateB = DateTime.now();
           }
@@ -579,10 +582,15 @@ class _TeacherAttendanceHistoryScreenState
     List<Map<String, dynamic>> records,
     bool isMobile,
   ) {
-    // ✅ CHANGED: Convert to local time
-    final sessionDateTime = records.isNotEmpty
-        ? DateTime.parse(records.first['marked_at']).toLocal()
-        : DateTime.now();
+    final dateStr = records.isNotEmpty
+        ? (records.first['session_date'] ?? records.first['marked_at'])
+        : null;
+    DateTime sessionDateTime;
+    try {
+      sessionDateTime = dateStr != null ? DateTime.parse(dateStr).toLocal() : DateTime.now();
+    } catch (_) {
+      sessionDateTime = DateTime.now();
+    }
 
     final presentCount = records.where((r) => r['status'] == 'present').length;
     final attendanceRate = (presentCount / records.length * 100);
@@ -600,9 +608,8 @@ class _TeacherAttendanceHistoryScreenState
           ? '${sessionKey.substring(0, 12)}...'
           : sessionKey;
       sessionTitle = 'Session: $displayId';
-      sessionSubtitle = DateFormat(
-        'EEEE, MMM dd, yyyy',
-      ).format(sessionDateTime);
+      sessionSubtitle =
+          '${DateFormat('EEEE, MMM dd, yyyy').format(sessionDateTime)} • ${DateFormat('hh:mm a').format(sessionDateTime)}';
     } else {
       // Display date and time for datetime-based grouping
       sessionTitle = DateFormat('EEEE, MMM dd, yyyy').format(sessionDateTime);

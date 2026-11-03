@@ -166,13 +166,33 @@ def get_teacher_attendance_history(request):
             status=status.HTTP_403_FORBIDDEN
         )
     
+    # Auto-heal: Ensure completed sessions for this teacher have records for enrolled students
+    empty_completed_sessions = AttendanceSession.objects.filter(
+        teacher=user,
+        status='completed',
+        records__isnull=True
+    ).select_related('class_obj')
+    for empty_session in empty_completed_sessions:
+        enrollments = Enrollment.objects.filter(class_obj=empty_session.class_obj).select_related('student')
+        new_records = [
+            AttendanceRecord(
+                session=empty_session,
+                student=enr.student,
+                status='absent'
+            )
+            for enr in enrollments
+        ]
+        if new_records:
+            AttendanceRecord.objects.bulk_create(new_records, ignore_conflicts=True)
+            AttendanceRecord.objects.filter(session=empty_session).update(marked_at=empty_session.start_time)
+
     # Base query: all attendance records for teacher's classes
     records = AttendanceRecord.objects.filter(
         session__teacher=user
     ).select_related(
         'student__student_profile',
         'session__class_obj'
-    ).order_by('-marked_at')
+    ).order_by('-session__start_time', '-marked_at')
     
     # Apply filters
     class_id = request.query_params.get('class_id')

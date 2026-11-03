@@ -78,135 +78,130 @@ class SyncService {
     return _database!;
   }
 
+  static const int _dbVersion = 8;
+
   Future<Database> _initDB() async {
     final dbPath = await getDatabasesPath();
     final path = join(dbPath, 'offline_sync.db');
 
     return await openDatabase(
       path,
-      version: 7,
+      version: _dbVersion,
       onUpgrade: (db, oldVersion, newVersion) async {
-        if (oldVersion < 2) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS offline_sessions (
-              id TEXT PRIMARY KEY,
-              class_id INTEGER NOT NULL,
-              class_type TEXT NOT NULL,
-              duration_minutes INTEGER NOT NULL,
-              start_time TEXT NOT NULL,
-              end_time TEXT NOT NULL,
-              shape_data TEXT,
-              reference_image_path TEXT,
-              status TEXT DEFAULT 'pending'
-            )
-          ''');
-        }
-        if (oldVersion < 3) {
-          await db.execute('''
-            CREATE TABLE IF NOT EXISTS offline_qr_queue (
-              id INTEGER PRIMARY KEY AUTOINCREMENT,
-              session_id TEXT NOT NULL,
-              timestamp TEXT NOT NULL,
-              status TEXT DEFAULT 'pending'
-            )
-          ''');
-        }
-        if (oldVersion < 4) {
-          try {
-            await db.execute(
-              'ALTER TABLE offline_sessions ADD COLUMN class_type TEXT NOT NULL DEFAULT "qr"',
-            );
-          } catch (e) {
-            // Ignore if column already exists
-          }
-        }
-        if (oldVersion < 5) {
-          try {
-            await db.execute(
-              'ALTER TABLE offline_qr_queue ADD COLUMN ble_hop_count INTEGER',
-            );
-            await db.execute(
-              'ALTER TABLE offline_qr_queue ADD COLUMN ble_rssi INTEGER',
-            );
-            await db.execute(
-              'ALTER TABLE offline_qr_queue ADD COLUMN qr_token TEXT',
-            );
-            await db.execute(
-              'ALTER TABLE offline_qr_queue ADD COLUMN captcha TEXT',
-            );
-          } catch (e) {
-            // Ignore if columns already exist
-          }
-        }
-        if (oldVersion < 6) {
-          try {
-            await db.execute(
-              'ALTER TABLE offline_queue ADD COLUMN ble_hop_count INTEGER',
-            );
-            await db.execute(
-              'ALTER TABLE offline_queue ADD COLUMN ble_rssi INTEGER',
-            );
-          } catch (e) {
-            // Ignore if columns already exist
-          }
-        }
-        if (oldVersion < 7) {
-          try {
-            await db.execute(
-              'ALTER TABLE offline_sessions ADD COLUMN totp_secret TEXT',
-            );
-            await db.execute(
-              'ALTER TABLE offline_sessions ADD COLUMN rotation_interval INTEGER',
-            );
-            // Re-run this just in case the user's DB missed it during version 5
-            await db.execute(
-              'ALTER TABLE offline_qr_queue ADD COLUMN qr_token TEXT',
-            );
-          } catch (e) {
-            // Ignore if columns already exist
-          }
-        }
+        debugPrint('[SyncService] onUpgrade from $oldVersion to $newVersion');
+        await _ensureSchema(db);
       },
       onCreate: (db, version) async {
-        await db.execute('''
-          CREATE TABLE offline_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            image_path TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            ble_hop_count INTEGER,
-            ble_rssi INTEGER,
-            status TEXT DEFAULT 'pending'
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE offline_sessions (
-            id TEXT PRIMARY KEY,
-            class_id INTEGER NOT NULL,
-            class_type TEXT NOT NULL,
-            duration_minutes INTEGER NOT NULL,
-            start_time TEXT NOT NULL,
-            end_time TEXT NOT NULL,
-            shape_data TEXT,
-            reference_image_path TEXT,
-            totp_secret TEXT,
-            rotation_interval INTEGER,
-            status TEXT DEFAULT 'pending'
-          )
-        ''');
-        await db.execute('''
-          CREATE TABLE offline_qr_queue (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            session_id TEXT NOT NULL,
-            timestamp TEXT NOT NULL,
-            ble_hop_count INTEGER,
-            ble_rssi INTEGER,
-            qr_token TEXT,
-            captcha TEXT,
-            status TEXT DEFAULT 'pending'
-          )
-        ''');
+        debugPrint('[SyncService] onCreate version $version');
+        await _ensureSchema(db);
+      },
+      onOpen: (db) async {
+        debugPrint('[SyncService] onOpen database - checking schema self-repair');
+        await _ensureSchema(db);
       },
     );
+  }
+
+  /// Ensures all tables and all required columns exist across any DB version.
+  /// Self-heals in-place without deleting existing user data.
+  Future<void> _ensureSchema(Database db) async {
+    // 1. Ensure all required tables exist
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        image_path TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        ble_hop_count INTEGER,
+        ble_rssi INTEGER,
+        status TEXT DEFAULT 'pending'
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_sessions (
+        id TEXT PRIMARY KEY,
+        class_id INTEGER NOT NULL,
+        class_type TEXT NOT NULL,
+        duration_minutes INTEGER NOT NULL,
+        start_time TEXT NOT NULL,
+        end_time TEXT NOT NULL,
+        shape_data TEXT,
+        reference_image_path TEXT,
+        totp_secret TEXT,
+        rotation_interval INTEGER,
+        status TEXT DEFAULT 'pending'
+      )
+    ''');
+    await db.execute('''
+      CREATE TABLE IF NOT EXISTS offline_qr_queue (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        timestamp TEXT NOT NULL,
+        ble_hop_count INTEGER,
+        ble_rssi INTEGER,
+        qr_token TEXT,
+        captcha TEXT,
+        status TEXT DEFAULT 'pending'
+      )
+    ''');
+
+    // 2. Safely ensure all columns exist across table variations
+    await _ensureColumns(db, 'offline_queue', {
+      'image_path': 'TEXT NOT NULL DEFAULT ""',
+      'timestamp': 'TEXT NOT NULL DEFAULT ""',
+      'ble_hop_count': 'INTEGER',
+      'ble_rssi': 'INTEGER',
+      'status': "TEXT DEFAULT 'pending'",
+    });
+
+    await _ensureColumns(db, 'offline_sessions', {
+      'class_id': 'INTEGER NOT NULL DEFAULT 0',
+      'class_type': 'TEXT NOT NULL DEFAULT "qr"',
+      'duration_minutes': 'INTEGER NOT NULL DEFAULT 45',
+      'start_time': 'TEXT NOT NULL DEFAULT ""',
+      'end_time': 'TEXT NOT NULL DEFAULT ""',
+      'shape_data': 'TEXT',
+      'reference_image_path': 'TEXT',
+      'totp_secret': 'TEXT',
+      'rotation_interval': 'INTEGER',
+      'status': "TEXT DEFAULT 'pending'",
+    });
+
+    await _ensureColumns(db, 'offline_qr_queue', {
+      'session_id': 'TEXT NOT NULL DEFAULT ""',
+      'timestamp': 'TEXT NOT NULL DEFAULT ""',
+      'ble_hop_count': 'INTEGER',
+      'ble_rssi': 'INTEGER',
+      'qr_token': 'TEXT',
+      'captcha': 'TEXT',
+      'status': "TEXT DEFAULT 'pending'",
+    });
+  }
+
+  Future<void> _ensureColumns(
+    Database db,
+    String tableName,
+    Map<String, String> requiredColumns,
+  ) async {
+    try {
+      final info = await db.rawQuery('PRAGMA table_info($tableName)');
+      final existingColumns = info
+          .map((row) => (row['name'] as String?)?.toLowerCase())
+          .whereType<String>()
+          .toSet();
+
+      for (final entry in requiredColumns.entries) {
+        if (!existingColumns.contains(entry.key.toLowerCase())) {
+          try {
+            await db.execute('ALTER TABLE $tableName ADD COLUMN ${entry.key} ${entry.value}');
+            debugPrint('[SyncService] Added missing column "${entry.key}" to $tableName');
+          } catch (e) {
+            debugPrint('[SyncService] Error adding column "${entry.key}" to $tableName: $e');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[SyncService] Failed inspecting columns for $tableName: $e');
+    }
   }
 
   // --- WEB HELPERS ---
@@ -245,8 +240,15 @@ class SyncService {
     }
 
     final db = await database;
-    await db.insert('offline_sessions', sessionItem);
-    debugPrint('Queued offline session ${sessionData['id']}');
+    try {
+      await db.insert('offline_sessions', sessionItem);
+      debugPrint('Queued offline session ${sessionData['id']}');
+    } catch (e) {
+      debugPrint('[SyncService] Insert offline_sessions failed: $e. Repairing schema...');
+      await _ensureSchema(db);
+      await db.insert('offline_sessions', sessionItem);
+      debugPrint('Queued offline session ${sessionData['id']} after repair');
+    }
   }
 
   Future<void> enqueuePatternScan(
@@ -273,8 +275,15 @@ class SyncService {
     }
 
     final db = await database;
-    await db.insert('offline_queue', item..remove('id'));
-    debugPrint('Queued offline pattern scan at $timestamp');
+    try {
+      await db.insert('offline_queue', item..remove('id'));
+      debugPrint('Queued offline pattern scan at $timestamp');
+    } catch (e) {
+      debugPrint('[SyncService] Insert offline_queue failed: $e. Repairing schema...');
+      await _ensureSchema(db);
+      await db.insert('offline_queue', item..remove('id'));
+      debugPrint('Queued offline pattern scan at $timestamp after repair');
+    }
   }
 
   Future<int> getPendingCount() async {
@@ -324,8 +333,15 @@ class SyncService {
     }
 
     final db = await database;
-    await db.insert('offline_sessions', item);
-    debugPrint('Queued offline session $id');
+    try {
+      await db.insert('offline_sessions', item);
+      debugPrint('Queued offline session $id');
+    } catch (e) {
+      debugPrint('[SyncService] Insert offline_sessions failed: $e. Repairing schema...');
+      await _ensureSchema(db);
+      await db.insert('offline_sessions', item);
+      debugPrint('Queued offline session $id after repair');
+    }
   }
 
   Future<void> updateSessionReferenceImage(String id, String imagePath) async {
@@ -734,7 +750,14 @@ class SyncService {
     }
 
     final db = await database;
-    await db.insert('offline_qr_queue', item..remove('id'));
-    debugPrint('Queued offline QR scan for session $sessionId');
+    try {
+      await db.insert('offline_qr_queue', item..remove('id'));
+      debugPrint('Queued offline QR scan for session $sessionId');
+    } catch (e) {
+      debugPrint('[SyncService] Insert offline_qr_queue failed: $e. Repairing schema...');
+      await _ensureSchema(db);
+      await db.insert('offline_qr_queue', item..remove('id'));
+      debugPrint('Queued offline QR scan for session $sessionId after repair');
+    }
   }
 }

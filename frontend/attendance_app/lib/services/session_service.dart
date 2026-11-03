@@ -18,13 +18,13 @@ class SessionService {
     return await StorageService.read(key: 'access_token');
   }
 
-  /// Create a new attendance session
   Future<Map<String, dynamic>> createSession({
     required int classId,
     required int durationMinutes,
     String classType = 'qr',
     String? startTime,
     int? rotationInterval,
+    bool isPastSession = false,
   }) async {
     try {
       final token = await _getToken();
@@ -37,6 +37,7 @@ class SessionService {
           'class_type': classType,
           if (startTime != null) 'start_time': startTime,
           if (rotationInterval != null) 'rotation_interval': rotationInterval,
+          'is_past_session': isPastSession,
         },
         options: Options(headers: ApiConfig.authHeaders(token)),
       );

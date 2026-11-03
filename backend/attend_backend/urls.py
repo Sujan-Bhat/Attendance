@@ -44,6 +44,8 @@ from attendance.views import (
     register_face,
     verify_face_auth,
     face_status,
+    teacher_analytics,
+    student_analytics,
 )
 from rest_framework_simplejwt.views import TokenRefreshView
 from django.views.static import serve as static_serve
@@ -146,6 +148,10 @@ urlpatterns = [
     # Announcements
     path('api/v1/announcements/', announcements_list_create, name='announcements'),
     path('api/v1/announcements/<int:pk>/', announcement_detail, name='announcement_detail'),
+
+    # Analytics
+    path('api/v1/analytics/teacher/', teacher_analytics, name='teacher_analytics'),
+    path('api/v1/analytics/student/', student_analytics, name='student_analytics'),
 
     # Utility
     path('api/v1/ping/', ping, name='ping'),

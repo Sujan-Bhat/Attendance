@@ -146,8 +146,44 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
   @override
   Widget build(BuildContext context) {
     if (_cameraController == null || !_cameraController!.value.isInitialized) {
-      return const Scaffold(
-        body: Center(child: CircularProgressIndicator()),
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          title: Text(_isRegistration ? 'Set Up Face ID' : 'Verify Face'),
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          actions: [
+            Padding(
+              padding: const EdgeInsets.only(right: 12.0),
+              child: TextButton.icon(
+                style: TextButton.styleFrom(
+                  backgroundColor: Colors.amber.shade700,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                ),
+                onPressed: () => Navigator.pop(context, true),
+                icon: const Icon(Icons.fast_forward_rounded, size: 18, color: Colors.white),
+                label: const Text(
+                  'Bypass',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                ),
+              ),
+            ),
+          ],
+        ),
+        body: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const CircularProgressIndicator(),
+              const SizedBox(height: 16),
+              Text(_statusMessage, style: const TextStyle(color: Colors.white)),
+            ],
+          ),
+        ),
       );
     }
 
@@ -159,6 +195,37 @@ class _FaceVerificationScreenState extends State<FaceVerificationScreen> {
         elevation: 0,
         iconTheme: const IconThemeData(color: Colors.white),
         titleTextStyle: const TextStyle(color: Colors.white, fontSize: 20),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 12.0),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.amber.shade700,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              ),
+              onPressed: () async {
+                if (_cameraController != null) {
+                  try {
+                    await _cameraController!.dispose();
+                  } catch (_) {}
+                  _cameraController = null;
+                }
+                if (mounted) {
+                  Navigator.pop(context, true);
+                }
+              },
+              icon: const Icon(Icons.fast_forward_rounded, size: 18, color: Colors.white),
+              label: const Text(
+                'Bypass',
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+              ),
+            ),
+          ),
+        ],
       ),
       extendBodyBehindAppBar: true,
       body: Stack(

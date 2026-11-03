@@ -66,6 +66,11 @@ from .misc_views import (  # noqa: F401
     assetlinks_json,
 )
 
+from .analytics_views import (  # noqa: F401
+    teacher_analytics,
+    student_analytics,
+)
+
 __all__ = [
     "RegisterView",
     "MeView",
@@ -107,4 +112,6 @@ __all__ = [
     "announcements_list_create",
     "announcement_detail",
     "assetlinks_json",
+    "teacher_analytics",
+    "student_analytics",
 ]

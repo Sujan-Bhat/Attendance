@@ -26,6 +26,14 @@ class MainActivity : FlutterFragmentActivity() {
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        // Explicitly initialize ML Kit context to ensure robust scanner startup
+        try {
+            com.google.mlkit.common.sdkinternal.MlKitContext.initializeIfNeeded(applicationContext)
+            android.util.Log.d("MainActivity", "MlKitContext successfully initialized")
+        } catch (e: Throwable) {
+            android.util.Log.e("MainActivity", "Error initializing MlKitContext: ${e.message}", e)
+        }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "attendance_app/camera")
             .setMethodCallHandler { call, result ->
                 when (call.method) {
