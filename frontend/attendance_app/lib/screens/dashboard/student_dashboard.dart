@@ -14,6 +14,7 @@ import '../../services/storage_service.dart';
 import '../../widgets/offline_indicator.dart';
 import '../../services/face_auth_service.dart';
 import '../student/face_verification_screen.dart';
+import '../analytics/student_analytics_screen.dart';
 
 class StudentDashboardPage extends StatefulWidget {
   const StudentDashboardPage({super.key});
@@ -68,6 +69,12 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
       'subtitle': 'View notices and updates',
       'icon': Icons.campaign_rounded,
       'gradientColors': [const Color(0xFFEF8AF6), Colors.white],
+    },
+    {
+      'title': 'Analytics',
+      'subtitle': 'Attendance insights & stats',
+      'icon': Icons.insights_rounded,
+      'gradientColors': [const Color(0xFF007C91), Colors.white],
     },
   ];
 
@@ -250,6 +257,13 @@ class _StudentDashboardPageState extends State<StudentDashboardPage> {
         Navigator.push(
           context,
           MaterialPageRoute(builder: (context) => const StudentAnnouncementsScreen()),
+        );
+        break;
+
+      case 'Analytics':
+        Navigator.push(
+          context,
+          MaterialPageRoute(builder: (context) => const StudentAnalyticsScreen()),
         );
         break;
 

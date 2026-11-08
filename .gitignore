@@ -64,6 +64,9 @@ frontend/attendance_app/ios/.symlinks/
 
 # Repo analysis/cache tooling
 .cgraph/
+.agents/
+backend/face_data/
+backend/session_references/
 
 # Generated APKs (optional - remove if you want to track them)
 *.apk

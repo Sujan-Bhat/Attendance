@@ -9,6 +9,8 @@ import 'dart:math';
 import 'package:uuid/uuid.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'session_active_screen.dart';
+import 'teacher_attendance_history_screen.dart';
+import 'package:intl/intl.dart';
 import '../../services/sync_service.dart';
 import '../../widgets/teacher_web_layout.dart';
 import '../../widgets/offline_indicator.dart';
@@ -31,7 +33,7 @@ class _SessionPageState extends State<SessionPage>
   String? selectedSemester;
   String selectedClassType = 'qr'; // Default to qr
 
-  final TextEditingController durationController = TextEditingController();
+  final TextEditingController durationController = TextEditingController(text: '45');
   final TextEditingController rotationIntervalController = TextEditingController(text: '10');
 
   Timer? countdownTimer;
@@ -90,6 +92,17 @@ class _SessionPageState extends State<SessionPage>
     if (durationMinutes == null || durationMinutes <= 0) {
       _showErrorSnackBar("Please enter a valid duration in minutes.");
       return;
+    }
+
+    if (isPastSession) {
+      if (selectedStartTime == null) {
+        _showErrorSnackBar("Please select a date and time for the past session.");
+        return;
+      }
+      if (selectedStartTime!.isAfter(DateTime.now())) {
+        _showErrorSnackBar("Past session start time cannot be in the future.");
+        return;
+      }
     }
 
     setState(() => isCreatingSession = true);
@@ -232,6 +245,7 @@ class _SessionPageState extends State<SessionPage>
             ? selectedStartTime!.toUtc().toIso8601String()
             : null,
         rotationInterval: int.tryParse(rotationIntervalController.text) ?? 10,
+        isPastSession: isPastSession,
       );
 
       if (!mounted) return;
@@ -255,7 +269,9 @@ class _SessionPageState extends State<SessionPage>
         );
 
         _showSuccessSnackBar(
-          "Session started for $selectedSubjectCode - $selectedSubjectName",
+          isPastSession
+              ? "Past session active for $selectedSubjectCode - $selectedSubjectName. You can mark attendance now."
+              : "Session started for $selectedSubjectCode - $selectedSubjectName",
         );
       } else {
         setState(() => isCreatingSession = false);
@@ -328,6 +344,63 @@ class _SessionPageState extends State<SessionPage>
         margin: const EdgeInsets.all(16),
       ),
     );
+  }
+
+  Future<void> _pickPastDate() async {
+    final current = selectedStartTime ?? DateTime.now().subtract(const Duration(hours: 1));
+    final pickedDate = await showDatePicker(
+      context: context,
+      initialDate: current.isBefore(DateTime.now()) ? current : DateTime.now().subtract(const Duration(hours: 1)),
+      firstDate: DateTime(2000),
+      lastDate: DateTime.now(),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: Color(0xFF007C91)),
+        ),
+        child: child!,
+      ),
+    );
+    if (pickedDate != null && mounted) {
+      setState(() {
+        selectedStartTime = DateTime(
+          pickedDate.year,
+          pickedDate.month,
+          pickedDate.day,
+          current.hour,
+          current.minute,
+        );
+      });
+      // Automatically prompt the time picker on the next frame so the date picker unmounts cleanly
+      await Future.delayed(const Duration(milliseconds: 200));
+      if (mounted) {
+        _pickPastTime();
+      }
+    }
+  }
+
+  Future<void> _pickPastTime() async {
+    final current = selectedStartTime ?? DateTime.now().subtract(const Duration(hours: 1));
+    final pickedTime = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(current),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: const ColorScheme.light(primary: Color(0xFF007C91)),
+        ),
+        child: child!,
+      ),
+    );
+    if (pickedTime != null && mounted) {
+      setState(() {
+        selectedStartTime = DateTime(
+          current.year,
+          current.month,
+          current.day,
+          pickedTime.hour,
+          pickedTime.minute,
+        );
+      });
+    }
   }
 
   @override
@@ -741,14 +814,15 @@ class _SessionPageState extends State<SessionPage>
                                       "Past Session",
                                       style: TextStyle(fontWeight: FontWeight.bold),
                                     ),
-                                    subtitle: const Text("Create a session for a previous date"),
+                                    subtitle: const Text("Create a session for a previous date and record attendance"),
                                     activeColor: const Color(0xFF007C91),
                                     value: isPastSession,
                                     onChanged: (bool value) {
                                       setState(() {
                                         isPastSession = value;
-                                        if (value && selectedStartTime == null) {
-                                          selectedStartTime = DateTime.now();
+                                        if (value && (selectedStartTime == null || selectedStartTime!.isAfter(DateTime.now()))) {
+                                          final dur = int.tryParse(durationController.text) ?? 60;
+                                          selectedStartTime = DateTime.now().subtract(Duration(minutes: dur + 10));
                                         }
                                       });
                                     },
@@ -758,7 +832,7 @@ class _SessionPageState extends State<SessionPage>
                                 if (isPastSession) ...[
                                   SizedBox(height: isMobile ? 16 : 24),
                                   Text(
-                                    "Start Date & Time",
+                                    "Session Date & Start Time",
                                     style: TextStyle(
                                       fontSize: isMobile ? 14 : 16,
                                       fontWeight: FontWeight.bold,
@@ -766,81 +840,134 @@ class _SessionPageState extends State<SessionPage>
                                     ),
                                   ),
                                   const SizedBox(height: 10),
-                                  InkWell(
-                                    onTap: () async {
-                                      final date = await showDatePicker(
-                                        context: context,
-                                        initialDate: selectedStartTime ?? DateTime.now(),
-                                        firstDate: DateTime(2000),
-                                        lastDate: DateTime.now(),
-                                        builder: (context, child) {
-                                          return Theme(
-                                            data: Theme.of(context).copyWith(
-                                              colorScheme: const ColorScheme.light(
-                                                primary: Color(0xFF007C91),
+                                  Row(
+                                    children: [
+                                      // Date Picker Card
+                                      Expanded(
+                                        flex: 3,
+                                        child: InkWell(
+                                          onTap: _pickPastDate,
+                                          borderRadius: BorderRadius.circular(16),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius: BorderRadius.circular(16),
+                                              border: Border.all(
+                                                color: const Color(0xFF007C91).withOpacity(0.3),
+                                                width: 1.5,
                                               ),
-                                            ),
-                                            child: child!,
-                                          );
-                                        },
-                                      );
-                                      if (date != null && mounted) {
-                                        final time = await showTimePicker(
-                                          context: context,
-                                          initialTime: TimeOfDay.fromDateTime(selectedStartTime ?? DateTime.now()),
-                                          builder: (context, child) {
-                                            return Theme(
-                                              data: Theme.of(context).copyWith(
-                                                colorScheme: const ColorScheme.light(
-                                                  primary: Color(0xFF007C91),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withOpacity(0.04),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 3),
                                                 ),
-                                              ),
-                                              child: child!,
-                                            );
-                                          },
-                                        );
-                                        if (time != null && mounted) {
-                                          setState(() {
-                                            selectedStartTime = DateTime(
-                                              date.year,
-                                              date.month,
-                                              date.day,
-                                              time.hour,
-                                              time.minute,
-                                            );
-                                          });
-                                        }
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(16),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withOpacity(0.05),
-                                            blurRadius: 10,
-                                            offset: const Offset(0, 4),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Row(
-                                        children: [
-                                          const Icon(Icons.calendar_today, color: Color(0xFF007C91)),
-                                          const SizedBox(width: 12),
-                                          Text(
-                                            selectedStartTime != null
-                                                ? "${selectedStartTime!.toLocal().toString().substring(0, 16)}"
-                                                : "Select Date and Time",
-                                            style: TextStyle(
-                                              fontSize: isMobile ? 14 : 16,
-                                              color: selectedStartTime != null ? Colors.black87 : Colors.grey[400],
+                                              ],
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.calendar_month_rounded,
+                                                  color: Color(0xFF007C91),
+                                                  size: 22,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(
+                                                        "Date",
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.grey[600],
+                                                          fontWeight: FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        selectedStartTime != null
+                                                            ? DateFormat('MMM dd, yyyy').format(selectedStartTime!)
+                                                            : "Pick Date",
+                                                        style: TextStyle(
+                                                          fontSize: isMobile ? 13 : 14,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.black87,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                        ],
+                                        ),
                                       ),
-                                    ),
+                                      const SizedBox(width: 10),
+                                      // Time / Timer Picker Card
+                                      Expanded(
+                                        flex: 2,
+                                        child: InkWell(
+                                          onTap: _pickPastTime,
+                                          borderRadius: BorderRadius.circular(16),
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
+                                            decoration: BoxDecoration(
+                                              color: Colors.white,
+                                              borderRadius: BorderRadius.circular(16),
+                                              border: Border.all(
+                                                color: const Color(0xFF007C91).withOpacity(0.3),
+                                                width: 1.5,
+                                              ),
+                                              boxShadow: [
+                                                BoxShadow(
+                                                  color: Colors.black.withOpacity(0.04),
+                                                  blurRadius: 8,
+                                                  offset: const Offset(0, 3),
+                                                ),
+                                              ],
+                                            ),
+                                            child: Row(
+                                              children: [
+                                                const Icon(
+                                                  Icons.access_time_filled_rounded,
+                                                  color: Color(0xFF007C91),
+                                                  size: 22,
+                                                ),
+                                                const SizedBox(width: 8),
+                                                Expanded(
+                                                  child: Column(
+                                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                                    children: [
+                                                      Text(
+                                                        "Time (Timer)",
+                                                        style: TextStyle(
+                                                          fontSize: 11,
+                                                          color: Colors.grey[600],
+                                                          fontWeight: FontWeight.w500,
+                                                        ),
+                                                      ),
+                                                      Text(
+                                                        selectedStartTime != null
+                                                            ? DateFormat('hh:mm a').format(selectedStartTime!)
+                                                            : "Pick Time",
+                                                        style: TextStyle(
+                                                          fontSize: isMobile ? 13 : 14,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: Colors.black87,
+                                                        ),
+                                                        overflow: TextOverflow.ellipsis,
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ],
 
@@ -1212,8 +1339,10 @@ class _SessionPageState extends State<SessionPage>
                                                       strokeWidth: 2,
                                                     ),
                                               )
-                                            : const Icon(
-                                                Icons.play_circle_fill_rounded,
+                                            : Icon(
+                                                isPastSession
+                                                    ? Icons.history_edu_rounded
+                                                    : Icons.play_circle_fill_rounded,
                                                 size: 24,
                                               ),
                                         label: Text(
@@ -1221,7 +1350,7 @@ class _SessionPageState extends State<SessionPage>
                                               ? "Creating..."
                                               : widget.subjects.isEmpty
                                               ? "No Classes Available"
-                                              : "Start Session",
+                                              : (isPastSession ? "Create Past Session" : "Start Session"),
                                           style: TextStyle(
                                             fontSize: isMobile ? 16 : 18,
                                             fontWeight: FontWeight.bold,

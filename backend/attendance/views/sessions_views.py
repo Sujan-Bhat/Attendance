@@ -49,6 +49,7 @@ def create_session(request):
     class_type = serializer.validated_data.get('class_type', 'qr')
     start_time = serializer.validated_data.get('start_time') or timezone.now()
     rotation_interval = serializer.validated_data.get('rotation_interval', 10)
+    is_past_session = serializer.validated_data.get('is_past_session', False)
     
     try:
         class_obj = Class.objects.get(id=class_id, teacher=user)
@@ -58,13 +59,16 @@ def create_session(request):
             status=status.HTTP_404_NOT_FOUND
         )
     
-    # Calculate end time
-    end_time = start_time + timedelta(minutes=duration_minutes)
+    # Calculate end time:
+    # If start_time is in the past, the historical date is preserved in start_time,
+    # but the live session window is set from now until now + duration_minutes so the teacher can run attendance.
+    is_genuinely_past = is_past_session or (timezone.now() - start_time).total_seconds() > 300
+    if is_genuinely_past:
+        end_time = timezone.now() + timedelta(minutes=duration_minutes)
+    else:
+        end_time = start_time + timedelta(minutes=duration_minutes)
     
-    # If the session end time is already in the past, mark it as completed
     session_status = 'active'
-    if end_time < timezone.now():
-        session_status = 'completed'
 
     
     # Generate session UUID
@@ -119,7 +123,21 @@ def create_session(request):
         status=session_status
     )
 
-    
+    # For past sessions, automatically populate attendance records for enrolled students so they appear in roster immediately
+    if is_genuinely_past:
+        enrollments = Enrollment.objects.filter(class_obj=class_obj).select_related('student')
+        records_to_create = [
+            AttendanceRecord(
+                session=session,
+                student=enrollment.student,
+                status='absent'
+            )
+            for enrollment in enrollments
+        ]
+        if records_to_create:
+            AttendanceRecord.objects.bulk_create(records_to_create, ignore_conflicts=True)
+            AttendanceRecord.objects.filter(session=session).update(marked_at=start_time)
+
     response_serializer = SessionSerializer(session)
     return Response({
         'message': 'Session created successfully',
@@ -299,8 +317,11 @@ def mark_attendance(request, session_id):
         start_timestamp = session.start_time.timestamp()
         
         valid = False
-        # Allow current, previous, and next windows (total 3 windows to be highly tolerant of drift)
-        for offset in [0, -1, 1]:
+        # Allow the current window plus/minus 2 windows (5 total). The token is
+        # minted on the teacher's phone clock but validated against the server
+        # clock (online) or the student's clock (offline sync), so a few seconds
+        # of drift would otherwise reject a legitimately scanned code.
+        for offset in [0, -1, 1, -2, 2]:
             test_timestamp = target_timestamp + (offset * (session.rotation_interval or 10))
             expected_token = calculate_totp_token(
                 str(session.session_id),
@@ -330,28 +351,13 @@ def mark_attendance(request, session_id):
     
     # Check if already marked
     existing_record = AttendanceRecord.objects.filter(session=session, student=user).first()
-    if existing_record:
-        if is_offline_sync and existing_record.status == 'absent':
-            # Allow offline sync to overwrite 'absent' with 'present'
-            existing_record.status = 'present'
-            existing_record.save()
-            if scan_time:
-                AttendanceRecord.objects.filter(id=existing_record.id).update(marked_at=scan_time)
-                existing_record.refresh_from_db()
-            return Response({
-                'message': f'Attendance marked for {session.class_obj.class_code}',
-                'class': session.class_obj.class_name,
-                'marked_at': existing_record.marked_at,
-                'status': 'present'
-            }, status=status.HTTP_200_OK)
-
+    if existing_record and existing_record.status == 'present':
         if is_offline_sync:
             return Response({
                 'message': 'Attendance already marked',
                 'marked_at': existing_record.marked_at,
                 'status': existing_record.status
             }, status=status.HTTP_200_OK)
-
         return Response({
             'error': 'Attendance already marked',
             'marked_at': existing_record.marked_at,
@@ -386,17 +392,29 @@ def mark_attendance(request, session_id):
         # Pattern mode or other modes might not require BLE strictly yet
         pass
 
-    # Mark attendance
-    record = AttendanceRecord.objects.create(
-        session=session,
-        student=user,
-        status='present',
-        verification_score=verification_score,
-        verification_reasons=json.dumps(verification_reasons_dict)
-    )
-    if scan_time:
-        AttendanceRecord.objects.filter(id=record.id).update(marked_at=scan_time)
-        record.refresh_from_db()
+    # Mark attendance: update existing record (e.g. absent/pending_review) or create new record
+    if existing_record:
+        existing_record.status = 'present'
+        existing_record.verification_score = verification_score
+        existing_record.verification_reasons = json.dumps(verification_reasons_dict)
+        existing_record.save()
+        if scan_time:
+            AttendanceRecord.objects.filter(id=existing_record.id).update(marked_at=scan_time)
+        else:
+            AttendanceRecord.objects.filter(id=existing_record.id).update(marked_at=timezone.now())
+        existing_record.refresh_from_db()
+        record = existing_record
+    else:
+        record = AttendanceRecord.objects.create(
+            session=session,
+            student=user,
+            status='present',
+            verification_score=verification_score,
+            verification_reasons=json.dumps(verification_reasons_dict)
+        )
+        if scan_time:
+            AttendanceRecord.objects.filter(id=record.id).update(marked_at=scan_time)
+            record.refresh_from_db()
     
     return Response({
         'message': f'Attendance marked for {session.class_obj.class_code}',
@@ -640,7 +658,11 @@ def end_session(request, session_id):
         
         # Update session status
         session.status = 'completed'
-        session.end_time = timezone.now()
+        if session.start_time < timezone.now() - timedelta(hours=1):
+            session.end_time = session.start_time + timedelta(minutes=session.duration_minutes)
+            AttendanceRecord.objects.filter(session=session).update(marked_at=session.start_time)
+        else:
+            session.end_time = timezone.now()
         session.save()
     
     # Get final statistics

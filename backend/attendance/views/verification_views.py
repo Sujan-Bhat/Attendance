@@ -167,8 +167,8 @@ def verify_image(request):
 
         existing_record = AttendanceRecord.objects.filter(session=session, student=user).first()
         if existing_record:
-            if existing_record.status == 'pending_review':
-                # Allow the student to retry scanning if their previous attempt failed verification
+            if existing_record.status in ['pending_review', 'absent']:
+                # Allow the student to retry scanning if their previous attempt was absent or pending review
                 existing_record.delete()
             else:
                 return Response({
